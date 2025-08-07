@@ -271,7 +271,7 @@ namespace ppstep {
               | lexeme[lit("#undef") > +space > anything[PPSTEP_ACTION(undefine_macro(ctx, attr))]]
               | lexeme[lit("#include") > +space > anything[PPSTEP_ACTION(include_file(ctx, attr))]]
               
-              // Recording commands - avoid hyphen issues
+              // Recording commands - PUT THEM IN THE RIGHT PLACE AND FORMAT
               | lexeme[(lit("record") | lit("rec")) > +space > anything[PPSTEP_ACTION(start_record(attr))]]
               | (lit("stoprecord") | lit("sr"))[PPSTEP_ACTION(stop_record())]
               | lit("status")[PPSTEP_ACTION(status())]
