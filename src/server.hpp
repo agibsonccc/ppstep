@@ -215,22 +215,6 @@ namespace ppstep {
             return false; // Let Wave handle it normally
         }
 
-        // Hook to handle ill-formed expressions
-        template <typename ContextT, typename ExceptionT>
-        bool may_skip_whitespace(ContextT const& ctx, TokenT& token, bool& skip_whitespace) {
-            // This hook can be used to handle special cases before whitespace processing
-            // Check if we're dealing with problematic tokens
-            if (token.get_value() == "0(0)") {
-                // This might be a malformed macro expansion, skip it
-                if (debug) {
-                    std::cout << "Skipping potentially malformed token: " << token.get_value() << std::endl;
-                }
-                skip_whitespace = true;
-                return true;
-            }
-            return false;
-        }
-
         template <typename ContextT>
         void lexed_token(ContextT& ctx, TokenT const& result) {
             if (should_skip_token(result)) return;
