@@ -229,10 +229,21 @@ namespace ppstep {
         
         template <typename ContextT, typename ExceptionT>
         void throw_exception(ContextT& ctx, ExceptionT const& e) {
-            // Try to handle specific exceptions gracefully
+            // Check the type of exception and handle macro redefinition warnings specially
             std::string error_msg = e.description();
             
-            // Check if this is the specific error we're trying to handle
+            // If it's a macro redefinition warning, just log it and continue
+            if (error_msg.find("illegal macro redefinition") != std::string::npos ||
+                error_msg.find("may not be redefined") != std::string::npos ||
+                error_msg.find("macro redefinition") != std::string::npos) {
+                if (debug) {
+                    std::cout << "Warning (suppressed): " << error_msg << std::endl;
+                }
+                // Don't throw the exception, just return and continue processing
+                return;
+            }
+            
+            // Check if this is the specific "ill formed preprocessor expression" error
             if (error_msg.find("ill formed preprocessor expression") != std::string::npos &&
                 error_msg.find("0(0)") != std::string::npos) {
                 if (debug) {
