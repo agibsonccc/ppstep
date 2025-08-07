@@ -247,7 +247,11 @@ namespace ppstep {
 #define PPSTEP_ACTION(...) ([this, &ctx](auto const& attr){ __VA_ARGS__; })
 
             qi::rule<Iterator, ascii::space_type> grammar =
-                lexeme[(lit("step") | lit("s")) >> -(+space >> uint_)][PPSTEP_ACTION(step(attr))]
+                // PUT RECORDING COMMANDS FIRST BEFORE OTHER COMMANDS
+                  lexeme[(lit("record") | lit("rec")) > +space > anything[PPSTEP_ACTION(start_record(attr))]]
+              | (lit("stoprecord") | lit("sr"))[PPSTEP_ACTION(stop_record())]
+              | lit("status")[PPSTEP_ACTION(status())]
+              | lexeme[(lit("step") | lit("s")) >> -(+space >> uint_)][PPSTEP_ACTION(step(attr))]
               | (lit("continue") | lit("c"))[PPSTEP_ACTION(step_continue())]
               | lexeme[(lit("backtrace") | lit("bt"))[PPSTEP_ACTION(expanding_trace())]]
               | lexeme[(lit("forwardtrace") | lit("ft"))[PPSTEP_ACTION(rescanning_trace())]]
@@ -266,16 +270,9 @@ namespace ppstep {
                       | ((lit("lex") | lit("l")) > +space > anything[PPSTEP_ACTION(remove_breakpoint(attr, preprocessing_event_type::LEXED))])
                 )]
               | lexeme[(lit("expand") | lit("e")) > +space > anything[PPSTEP_ACTION(expand_macro(ctx, attr))]]
-
               | lexeme[lit("#define") > +space > anything[PPSTEP_ACTION(define_macro(ctx, attr))]]
               | lexeme[lit("#undef") > +space > anything[PPSTEP_ACTION(undefine_macro(ctx, attr))]]
               | lexeme[lit("#include") > +space > anything[PPSTEP_ACTION(include_file(ctx, attr))]]
-              
-              // Recording commands - PUT THEM IN THE RIGHT PLACE AND FORMAT
-              | lexeme[(lit("record") | lit("rec")) > +space > anything[PPSTEP_ACTION(start_record(attr))]]
-              | (lit("stoprecord") | lit("sr"))[PPSTEP_ACTION(stop_record())]
-              | lit("status")[PPSTEP_ACTION(status())]
-              
               | (lit("what") | lit("?"))[PPSTEP_ACTION(explain_current_state())]
               | lit("macros")[PPSTEP_ACTION(show_macros(ctx))]
               | (lit("quit") | lit("q"))[PPSTEP_ACTION(quit())]
