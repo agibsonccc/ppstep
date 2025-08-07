@@ -68,6 +68,30 @@ namespace ppstep {
             cl.set_mode(stepping_mode::UNTIL_BREAK);
         }
         
+        // Recording commands
+        template <class Attr>
+        void start_record(Attr const& attr) {
+            std::string filename(attr.begin(), attr.end());
+            if (cl.start_recording(filename)) {
+                std::cout << "Recording to " << filename << std::endl;
+            } else {
+                std::cout << "Failed to open " << filename << " for recording" << std::endl;
+            }
+        }
+        
+        void stop_record() {
+            cl.stop_recording();
+            std::cout << "Recording stopped" << std::endl;
+        }
+        
+        void status() {
+            if (cl.is_recording()) {
+                std::cout << "Recording to: " << cl.get_record_filename() << std::endl;
+            } else {
+                std::cout << "Not recording" << std::endl;
+            }
+        }
+        
         template <class ContextT, class Attr>
         void expand_macro(ContextT& ctx, Attr const& attr) {
             using position_type = typename ContextT::position_type;
@@ -246,6 +270,11 @@ namespace ppstep {
               | lexeme[lit("#define") > +space > anything[PPSTEP_ACTION(define_macro(ctx, attr))]]
               | lexeme[lit("#undef") > +space > anything[PPSTEP_ACTION(undefine_macro(ctx, attr))]]
               | lexeme[lit("#include") > +space > anything[PPSTEP_ACTION(include_file(ctx, attr))]]
+              
+              // Recording commands
+              | lexeme[(lit("record") | lit("r")) > +space > anything[PPSTEP_ACTION(start_record(attr))]]
+              | (lit("stop-record") | lit("sr"))[PPSTEP_ACTION(stop_record())]
+              | lit("status")[PPSTEP_ACTION(status())]
               
               | (lit("what") | lit("?"))[PPSTEP_ACTION(explain_current_state())]
               | lit("macros")[PPSTEP_ACTION(show_macros(ctx))]

@@ -8,10 +8,14 @@
 #include <tuple>
 #include <iostream>
 #include <sstream>
+#include <fstream>
 #include <stdexcept>
 #include <algorithm>
 #include <set>
 #include <functional>
+#include <chrono>
+#include <ctime>
+#include <iomanip>
 
 #include "server_fwd.hpp"
 #include "client_fwd.hpp"
@@ -166,9 +170,50 @@ namespace ppstep {
     
     template <class TokenT, class ContainerT>
     struct client {
-        client(server_state<ContainerT>& state, std::string prefix) : state(&state), cli(client_cli<TokenT, ContainerT>(*this, std::move(prefix))), mode(stepping_mode::FREE) {}
+        client(server_state<ContainerT>& state, std::string prefix) : state(&state), cli(client_cli<TokenT, ContainerT>(*this, std::move(prefix))), mode(stepping_mode::FREE), recording_active(false) {}
         
         client(server_state<ContainerT>& state) : client(state, "") {}
+
+        // Recording functionality
+        bool start_recording(const std::string& filename) {
+            if (recording_active) {
+                stop_recording();
+            }
+            
+            record_file.open(filename, std::ios::out | std::ios::trunc);
+            if (!record_file.is_open()) {
+                return false;
+            }
+            
+            recording_active = true;
+            record_filename = filename;
+            
+            // Write header with timestamp
+            auto now = std::chrono::system_clock::now();
+            auto time_t = std::chrono::system_clock::to_time_t(now);
+            record_file << "=== PPSTEP TRACE ===" << std::endl;
+            record_file << "Started: " << std::ctime(&time_t);
+            record_file << "===================" << std::endl << std::endl;
+            
+            return true;
+        }
+        
+        void stop_recording() {
+            if (recording_active) {
+                record_file << std::endl << "=== END OF TRACE ===" << std::endl;
+                record_file.close();
+                recording_active = false;
+                record_filename.clear();
+            }
+        }
+        
+        bool is_recording() const {
+            return recording_active;
+        }
+        
+        std::string get_record_filename() const {
+            return record_filename;
+        }
 
         template <class ContextT>
         void on_lexed(ContextT& ctx, TokenT const& token) {
@@ -178,6 +223,11 @@ namespace ppstep {
 
                 lexed_tokens.push_back(token);
                 token_history.push_back(historical_event<ContainerT>(last_tokens, events::lexed<ContainerT>()));
+
+                // Record lexed token if recording
+                if (recording_active) {
+                    record_file << "[LEXED] " << token.get_value() << std::endl;
+                }
 
                 handle_prompt(ctx, token, preprocessing_event_type::LEXED);
 
@@ -197,6 +247,22 @@ namespace ppstep {
 
         template <class ContextT>
         void on_expand_function(ContextT& ctx, TokenT const& call, std::vector<ContainerT> const& arguments, ContainerT call_tokens) {
+            // Record function-like macro call if recording
+            if (recording_active) {
+                record_file << "[CALL] ";
+                for (const auto& tok : call_tokens) {
+                    record_file << tok.get_value();
+                }
+                record_file << " // Args: ";
+                for (size_t i = 0; i < arguments.size(); ++i) {
+                    if (i > 0) record_file << ", ";
+                    for (const auto& tok : arguments[i]) {
+                        record_file << tok.get_value();
+                    }
+                }
+                record_file << std::endl;
+            }
+
             if (token_stack.empty()) {
                 push(std::move(call_tokens), events::call<ContainerT>(call_tokens, lexed_tokens.size() + 0, lexed_tokens.size() + call_tokens.size()));
             } else {
@@ -219,6 +285,11 @@ namespace ppstep {
         void on_expand_object(ContextT& ctx, TokenT const& call) {
             auto call_tokens = ContainerT{call};
             
+            // Record object-like macro call if recording
+            if (recording_active) {
+                record_file << "[CALL] " << call.get_value() << std::endl;
+            }
+            
             if (token_stack.empty()) {
                 push(std::move(call_tokens), events::call<ContainerT>(call_tokens, lexed_tokens.size() + 0, lexed_tokens.size() + call_tokens.size()));
             } else {
@@ -239,6 +310,19 @@ namespace ppstep {
 
         template <class ContextT>
         void on_expanded(ContextT& ctx, ContainerT const& initial, ContainerT const& result) {
+            // Record expansion if recording
+            if (recording_active) {
+                record_file << "[EXPANDED] ";
+                for (const auto& tok : initial) {
+                    record_file << tok.get_value();
+                }
+                record_file << " => ";
+                for (const auto& tok : result) {
+                    record_file << tok.get_value();
+                }
+                record_file << std::endl;
+            }
+
             try {
                 auto const& [tokens, start, end] = match(initial);
 
@@ -260,6 +344,23 @@ namespace ppstep {
         template <class ContextT>
         void on_rescanned(ContextT& ctx, ContainerT const& cause, ContainerT const& initial, ContainerT const& result) {
             if (initial.empty()) return;
+
+            // Record rescan if recording
+            if (recording_active) {
+                record_file << "[RESCANNED] ";
+                for (const auto& tok : initial) {
+                    record_file << tok.get_value();
+                }
+                record_file << " => ";
+                for (const auto& tok : result) {
+                    record_file << tok.get_value();
+                }
+                record_file << " // Caused by: ";
+                for (const auto& tok : cause) {
+                    record_file << tok.get_value();
+                }
+                record_file << std::endl;
+            }
 
             try {
                 auto const& [tokens, start, end] = match(initial);
@@ -465,6 +566,11 @@ namespace ppstep {
         std::vector<historical_event<ContainerT>> token_history;
         std::vector<TokenT> lexed_tokens;
         std::vector<TokenT> lex_buffer;
+        
+        // Recording state
+        std::ofstream record_file;
+        bool recording_active;
+        std::string record_filename;
     };
 }
 
