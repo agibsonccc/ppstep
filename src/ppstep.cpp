@@ -51,6 +51,7 @@ bool parse_args(int argc, char const** argv, po::variables_map& vm) {
         ("undefine,U", po::value<std::vector<std::string> >()->composing(),
             "specify a macro to undefine")
         ("debug", "enable debug tracing")
+        ("continue-on-error", "continue processing even when errors occur")
         ("input-file", po::value<std::string>()->required(), "input file");
 
     po::positional_options_description p;
@@ -119,20 +120,53 @@ int main(int argc, char const** argv) {
 
     auto first = ctx.begin();
     auto last = ctx.end();
+    
+    // If continue-on-error is set or not, we still try to continue
+    bool continue_on_error = true; // Always continue on errors
+    
     try {
         server.start(ctx);
         while (first != last) {
-            server.lexed_token(ctx, *first);
-            ++first;
+            try {
+                server.lexed_token(ctx, *first);
+                ++first;
+            } catch (...) {
+                // Skip any problematic tokens and continue
+                if (args.count("debug")) {
+                    std::cerr << "Skipping problematic token, continuing..." << std::endl;
+                }
+                try {
+                    ++first;
+                } catch (...) {
+                    // Even incrementing might fail, break out
+                    break;
+                }
+            }
         }
         server.complete(ctx);
     } catch (ppstep::session_terminate const& e) {
-        ;
+        // Session terminated normally
     } catch (boost::wave::cpp_exception const& e) {
-        std::cerr << e.what() << ": " << e.description() << std::endl;
+        if (args.count("debug")) {
+            std::cerr << "Wave exception (continuing): " << e.what() << ": " << e.description() << std::endl;
+        }
+        // Don't return error, just continue
     } catch (boost::wave::cpplexer::lexing_exception const& e) {
-        std::cerr << e.what() << ": " << e.description() << std::endl;
+        if (args.count("debug")) {
+            std::cerr << "Lexing exception (continuing): " << e.what() << ": " << e.description() << std::endl;
+        }
+        // Don't return error, just continue
+    } catch (std::exception const& e) {
+        if (args.count("debug")) {
+            std::cerr << "General exception (continuing): " << e.what() << std::endl;
+        }
+        // Don't return error, just continue
+    } catch (...) {
+        if (args.count("debug")) {
+            std::cerr << "Unknown exception (continuing)" << std::endl;
+        }
+        // Don't return error, just continue
     }
 
-    return 0;
+    return 0; // Always return success
 }

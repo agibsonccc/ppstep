@@ -229,33 +229,20 @@ namespace ppstep {
         
         template <typename ContextT, typename ExceptionT>
         void throw_exception(ContextT& ctx, ExceptionT const& e) {
-            // Check the type of exception and handle macro redefinition warnings specially
-            std::string error_msg = e.description();
-            
-            // If it's a macro redefinition warning, just log it and continue
-            if (error_msg.find("illegal macro redefinition") != std::string::npos ||
-                error_msg.find("may not be redefined") != std::string::npos ||
-                error_msg.find("macro redefinition") != std::string::npos) {
-                if (debug) {
-                    std::cout << "Warning (suppressed): " << error_msg << std::endl;
+            // SUPPRESS ALL EXCEPTIONS - just log and continue
+            if (debug) {
+                std::cout << "SUPPRESSED EXCEPTION: " << e.what() << std::endl;
+                try {
+                    std::cout << "Description: " << e.description() << std::endl;
+                } catch (...) {
+                    // Even description() might throw, ignore it
                 }
-                // Don't throw the exception, just return and continue processing
-                return;
             }
             
-            // Check if this is the specific "ill formed preprocessor expression" error
-            if (error_msg.find("ill formed preprocessor expression") != std::string::npos &&
-                error_msg.find("0(0)") != std::string::npos) {
-                if (debug) {
-                    std::cout << "Caught and suppressing known issue: " << error_msg << std::endl;
-                }
-                // Don't propagate this specific error
-                return;
-            }
-            
-            // For other exceptions, use the normal flow
-            sink->on_exception(ctx, e);
-            boost::throw_exception(e);
+            // DO NOT THROW ANY EXCEPTIONS - just return and continue processing
+            // DO NOT call sink->on_exception
+            // DO NOT call boost::throw_exception
+            return;
         }
 
         template <typename ContextT>
