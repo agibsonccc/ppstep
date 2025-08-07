@@ -271,8 +271,8 @@ namespace ppstep {
               | lexeme[lit("#undef") > +space > anything[PPSTEP_ACTION(undefine_macro(ctx, attr))]]
               | lexeme[lit("#include") > +space > anything[PPSTEP_ACTION(include_file(ctx, attr))]]
               
-              // Recording commands
-              | lexeme[(lit("record") | lit("r")) > +space > anything[PPSTEP_ACTION(start_record(attr))]]
+              // Recording commands - use "rec" instead of "r" to avoid conflict with "rescan"
+              | lexeme[(lit("record") | lit("rec")) > +space > anything[PPSTEP_ACTION(start_record(attr))]]
               | (lit("stop-record") | lit("sr"))[PPSTEP_ACTION(stop_record())]
               | lit("status")[PPSTEP_ACTION(status())]
               
