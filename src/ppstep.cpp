@@ -106,17 +106,20 @@ int main(int argc, char const** argv) {
     ctx.set_max_include_nesting_depth(1024);
     
     // Add GCC compatibility macros unless explicitly disabled
+    // Note: We cannot redefine certain predefined macros like __cplusplus, __STDC__, etc.
+    // Boost.Wave manages these internally based on the language settings
     if (!args.count("skip-gcc-compat")) {
-        // GCC version macros
+        // GCC version macros - these are usually safe to define
         ctx.add_macro_definition("__GNUC__=11");
         ctx.add_macro_definition("__GNUC_MINOR__=0");
         ctx.add_macro_definition("__GNUC_PATCHLEVEL__=0");
         ctx.add_macro_definition("__GXX_ABI_VERSION=1016");
         
-        // C++ standard version
-        ctx.add_macro_definition("__cplusplus=202002L");
+        // DON'T define __cplusplus - Boost.Wave manages this internally
+        // ctx.add_macro_definition("__cplusplus=202002L"); // REMOVED
         
         // GCC built-in feature test macros (common ones that cause issues)
+        // These are the most important ones to fix the "0(0)" error
         ctx.add_macro_definition("__has_builtin(x)=0");
         ctx.add_macro_definition("__has_include(x)=0");
         ctx.add_macro_definition("__has_include_next(x)=0");
@@ -142,10 +145,10 @@ int main(int argc, char const** argv) {
         ctx.add_macro_definition("__LP64__=1");
         ctx.add_macro_definition("_LP64=1");
         
-        // Other common macros
-        ctx.add_macro_definition("__STDC__=1");
-        ctx.add_macro_definition("__STDC_VERSION__=201710L");
-        ctx.add_macro_definition("__STDC_HOSTED__=1");
+        // DON'T define these - Boost.Wave manages them:
+        // __STDC__, __STDC_VERSION__, __STDC_HOSTED__ - REMOVED
+        
+        // These are safe to define
         ctx.add_macro_definition("__STDCPP_DEFAULT_NEW_ALIGNMENT__=16");
         ctx.add_macro_definition("__STDCPP_THREADS__=1");
         
@@ -175,6 +178,17 @@ int main(int argc, char const** argv) {
     
     if (args.count("define")) {
         for (auto const& definition : args["define"].as<std::vector<std::string>>()) {
+            // Skip if trying to redefine protected macros
+            std::string def = definition;
+            if (def.find("__cplusplus") == 0 || 
+                def.find("__STDC__") == 0 ||
+                def.find("__STDC_VERSION__") == 0 ||
+                def.find("__STDC_HOSTED__") == 0) {
+                if (args.count("debug")) {
+                    std::cerr << "Warning: Skipping redefinition of protected macro: " << definition << std::endl;
+                }
+                continue;
+            }
             ctx.add_macro_definition(definition);
         }
     }
@@ -196,6 +210,17 @@ int main(int argc, char const** argv) {
         server.complete(ctx);
     } catch (ppstep::session_terminate const& e) {
         ;
+    } catch (boost::wave::macro_handling_exception const& e) {
+        // Handle macro-related exceptions
+        std::cerr << "Macro handling error: " << e.what() << std::endl;
+        std::cerr << "Description: " << e.description() << std::endl;
+        
+        std::string desc = e.description();
+        if (desc.find("may not be redefined") != std::string::npos) {
+            std::cerr << "\nNote: Some predefined macros like __cplusplus, __STDC__, etc. cannot be redefined." << std::endl;
+            std::cerr << "These are managed internally by Boost.Wave based on language settings." << std::endl;
+        }
+        return 1;
     } catch (boost::wave::preprocess_exception const& e) {
         // Handle preprocessing exceptions more gracefully
         std::cerr << "Preprocessing error: " << e.what() << std::endl;
