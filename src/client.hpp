@@ -215,10 +215,47 @@ namespace ppstep {
             return record_filename;
         }
         
-        // Helper function to output tokens preserving whitespace
-        void output_tokens_preserved(std::ostream& os, const ContainerT& tokens) {
+        // Helper function to output tokens with normalized whitespace
+        void output_tokens_normalized(std::ostream& os, const ContainerT& tokens) {
+            bool prev_was_whitespace = false;
+            bool need_space = false;
+            
             for (const auto& tok : tokens) {
-                os << tok.get_value();
+                // Check if this is a whitespace token
+                if (IS_CATEGORY(tok, boost::wave::WhiteSpaceTokenType)) {
+                    // Mark that we've seen whitespace but don't output it yet
+                    if (!prev_was_whitespace && need_space) {
+                        // We need whitespace here
+                        prev_was_whitespace = true;
+                    }
+                } else {
+                    // This is a non-whitespace token
+                    auto val = tok.get_value();
+                    
+                    // Add a single space if we had whitespace before this token
+                    if (prev_was_whitespace || need_space) {
+                        // Don't add space at the beginning or before certain punctuation
+                        if (!val.empty() && need_space) {
+                            char first_char = val.c_str()[0];
+                            if (first_char != ',' && first_char != ';' && first_char != ')' && 
+                                first_char != ']' && first_char != '}') {
+                                os << " ";
+                            }
+                        }
+                    }
+                    
+                    os << val;
+                    
+                    // Determine if we need space after this token
+                    if (!val.empty()) {
+                        char last_char = val.c_str()[val.size() - 1];
+                        need_space = (last_char != '(' && last_char != '[' && last_char != '{');
+                    } else {
+                        need_space = false;
+                    }
+                    
+                    prev_was_whitespace = false;
+                }
             }
         }
 
@@ -257,17 +294,17 @@ namespace ppstep {
         void on_expand_function(ContextT& ctx, TokenT const& call, std::vector<ContainerT> const& arguments, 
                                ContainerT call_tokens, std::vector<ContainerT> const& preserved_arguments, 
                                ContainerT preserved_call_tokens) {
-            // Record function-like macro call if recording with preserved whitespace
+            // Record function-like macro call if recording with normalized whitespace
             if (recording_active) {
                 record_file << "[CALL] ";
-                output_tokens_preserved(record_file, preserved_call_tokens);
+                output_tokens_normalized(record_file, preserved_call_tokens);
                 record_file << std::endl;
                 
-                // Record arguments with preserved whitespace
+                // Record arguments with normalized whitespace
                 if (!preserved_arguments.empty()) {
                     for (size_t i = 0; i < preserved_arguments.size(); ++i) {
                         record_file << "  ARG[" << i << "]: ";
-                        output_tokens_preserved(record_file, preserved_arguments[i]);
+                        output_tokens_normalized(record_file, preserved_arguments[i]);
                         record_file << std::endl;
                     }
                 }
@@ -365,14 +402,14 @@ namespace ppstep {
         template <class ContextT>
         void on_expanded(ContextT& ctx, ContainerT const& initial, ContainerT const& result,
                         ContainerT const& preserved_initial, ContainerT const& preserved_result) {
-            // Record expansion with preserved whitespace
+            // Record expansion with normalized whitespace
             if (recording_active) {
                 record_file << "[EXPANDED]" << std::endl;
                 record_file << "  FROM: ";
-                output_tokens_preserved(record_file, preserved_initial);
+                output_tokens_normalized(record_file, preserved_initial);
                 record_file << std::endl;
                 record_file << "  TO:   ";
-                output_tokens_preserved(record_file, preserved_result);
+                output_tokens_normalized(record_file, preserved_result);
                 record_file << std::endl;
             }
 
@@ -437,17 +474,17 @@ namespace ppstep {
                          ContainerT const& preserved_cause, ContainerT const& preserved_initial, ContainerT const& preserved_result) {
             if (initial.empty()) return;
 
-            // Record rescan with preserved whitespace
+            // Record rescan with normalized whitespace
             if (recording_active) {
                 record_file << "[RESCANNED]" << std::endl;
-                record_file << "  FROM:     ";
-                output_tokens_preserved(record_file, preserved_initial);
+                record_file << "  FROM:      ";
+                output_tokens_normalized(record_file, preserved_initial);
                 record_file << std::endl;
-                record_file << "  TO:       ";
-                output_tokens_preserved(record_file, preserved_result);
+                record_file << "  TO:        ";
+                output_tokens_normalized(record_file, preserved_result);
                 record_file << std::endl;
                 record_file << "  CAUSED BY: ";
-                output_tokens_preserved(record_file, preserved_cause);
+                output_tokens_normalized(record_file, preserved_cause);
                 record_file << std::endl;
             }
 
