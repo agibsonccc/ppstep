@@ -247,17 +247,23 @@ namespace ppstep {
 
         template <class ContextT>
         void on_expand_function(ContextT& ctx, TokenT const& call, std::vector<ContainerT> const& arguments, ContainerT call_tokens) {
-            // Record function-like macro call if recording
+            // Record function-like macro call if recording - use single-space separation
             if (recording_active) {
                 record_file << "[CALL] ";
+                bool first = true;
                 for (const auto& tok : call_tokens) {
+                    if (!first) record_file << " ";
                     record_file << tok.get_value();
+                    first = false;
                 }
                 record_file << " // Args: ";
                 for (size_t i = 0; i < arguments.size(); ++i) {
                     if (i > 0) record_file << ", ";
+                    bool first_arg = true;
                     for (const auto& tok : arguments[i]) {
+                        if (!first_arg) record_file << " ";
                         record_file << tok.get_value();
+                        first_arg = false;
                     }
                 }
                 record_file << std::endl;
@@ -310,15 +316,21 @@ namespace ppstep {
 
         template <class ContextT>
         void on_expanded(ContextT& ctx, ContainerT const& initial, ContainerT const& result) {
-            // Record expansion if recording
+            // Record expansion if recording - use single-space separation
             if (recording_active) {
                 record_file << "[EXPANDED] ";
+                bool first = true;
                 for (const auto& tok : initial) {
+                    if (!first) record_file << " ";
                     record_file << tok.get_value();
+                    first = false;
                 }
                 record_file << " => ";
+                first = true;
                 for (const auto& tok : result) {
+                    if (!first) record_file << " ";
                     record_file << tok.get_value();
+                    first = false;
                 }
                 record_file << std::endl;
             }
@@ -345,19 +357,28 @@ namespace ppstep {
         void on_rescanned(ContextT& ctx, ContainerT const& cause, ContainerT const& initial, ContainerT const& result) {
             if (initial.empty()) return;
 
-            // Record rescan if recording
+            // Record rescan if recording - use single-space separation
             if (recording_active) {
                 record_file << "[RESCANNED] ";
+                bool first = true;
                 for (const auto& tok : initial) {
+                    if (!first) record_file << " ";
                     record_file << tok.get_value();
+                    first = false;
                 }
                 record_file << " => ";
+                first = true;
                 for (const auto& tok : result) {
+                    if (!first) record_file << " ";
                     record_file << tok.get_value();
+                    first = false;
                 }
                 record_file << " // Caused by: ";
+                first = true;
                 for (const auto& tok : cause) {
+                    if (!first) record_file << " ";
                     record_file << tok.get_value();
+                    first = false;
                 }
                 record_file << std::endl;
             }
