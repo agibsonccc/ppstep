@@ -36,53 +36,6 @@ namespace ppstep {
         auto it = std::begin(data);
         return print_token_range(os, it, std::end(data));
     }
-    
-    // New function to print tokens with preserved whitespace (no artificial delimiters)
-    template <class Container>
-    std::ostream& print_token_container_preserved(std::ostream& os, Container const& data) {
-        for (auto const& token : data) {
-            os << token.get_value();
-        }
-        return os;
-    }
-    
-    // Helper to reconstruct text with intelligent spacing
-    template <class Container>
-    std::string reconstruct_with_spacing(Container const& tokens) {
-        std::stringstream ss;
-        bool need_space = false;
-        
-        for (auto const& tok : tokens) {
-            auto val = tok.get_value();
-            
-            // Check if we need to add spacing
-            if (need_space && !val.empty()) {
-                // Don't add space before certain punctuation
-                char first_char = val.c_str()[0];
-                if (first_char != ',' && first_char != ';' && first_char != ')' && 
-                    first_char != ']' && first_char != '}' && first_char != '.' &&
-                    first_char != '-' && first_char != '+' && first_char != '*' && 
-                    first_char != '/' && first_char != '%' && first_char != '=' &&
-                    first_char != '<' && first_char != '>' && first_char != '!' &&
-                    first_char != '&' && first_char != '|' && first_char != '^' &&
-                    first_char != '~' && first_char != '?' && first_char != ':') {
-                    ss << " ";
-                }
-            }
-            
-            ss << val;
-            
-            // Set flag for next iteration
-            if (!val.empty()) {
-                char last_char = val.c_str()[val.size() - 1];
-                need_space = (last_char != '(' && last_char != '[' && last_char != '{' &&
-                             last_char != ' ' && last_char != '\t' && last_char != '\n' &&
-                             last_char != '\r');
-            }
-        }
-        
-        return ss.str();
-    }
 
     template <class Container, class T>
     auto join_lists(Container const& lists, T const& separator) {

@@ -217,45 +217,44 @@ namespace ppstep {
         
         // Helper function to format tokens for recording with intelligent spacing
         std::string format_tokens_for_recording(const ContainerT& tokens) {
-            std::stringstream ss;
-            bool need_space = false;
+            if (tokens.empty()) return "";
             
-            for (const auto& tok : tokens) {
-                std::string val = tok.get_value().c_str();
-                
-                // Skip empty tokens
+            std::stringstream ss;
+            auto it = tokens.begin();
+            auto prev_val = it->get_value().c_str();
+            ss << prev_val;
+            ++it;
+            
+            for (; it != tokens.end(); ++it) {
+                std::string val = it->get_value().c_str();
                 if (val.empty()) continue;
                 
-                // Determine if we need space before this token
+                // Determine if we need space between tokens
+                bool need_space = true;
+                
+                // No space before certain punctuation
+                if (val == "," || val == ";" || val == ")" || val == "]" || val == "}" || val == ".") {
+                    need_space = false;
+                }
+                // No space after certain tokens
+                else if (!prev_val.empty() && (prev_val.back() == '(' || prev_val.back() == '[' || prev_val.back() == '{')) {
+                    need_space = false;
+                }
+                // No space around ::
+                else if (val == "::" || prev_val == "::") {
+                    need_space = false;
+                }
+                // No space after :: at end of previous token
+                else if (prev_val.length() >= 2 && prev_val.substr(prev_val.length() - 2) == "::") {
+                    need_space = false;
+                }
+                
                 if (need_space) {
-                    // Check if this token is an operator or punctuation that shouldn't have space before it
-                    char first = val[0];
-                    bool is_punctuation = (first == ',' || first == ';' || first == ')' || 
-                                          first == ']' || first == '}' || first == '.');
-                    bool is_scope = (val == "::");
-                    
-                    // Add space unless it's punctuation or scope operator
-                    if (!is_punctuation && !is_scope) {
-                        // Also check if previous token ended with ::
-                        ss << " ";
-                    }
+                    ss << " ";
                 }
                 
                 ss << val;
-                
-                // Determine if we need space after this token
-                char last = val[val.length() - 1];
-                bool ends_with_open = (last == '(' || last == '[' || last == '{');
-                bool is_scope_op = (val == "::");
-                bool is_pointer_or_ref = (val == "*" || val == "&");
-                
-                // Need space after most tokens, except opening brackets and scope operators
-                need_space = !ends_with_open && !is_scope_op;
-                
-                // Special case: don't add space after :: or before ::
-                if (val.length() >= 2 && val.substr(val.length() - 2) == "::") {
-                    need_space = false;
-                }
+                prev_val = val;
             }
             
             return ss.str();
