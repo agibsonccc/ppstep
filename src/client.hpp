@@ -215,48 +215,50 @@ namespace ppstep {
             return record_filename;
         }
         
-        // Helper function to output tokens with normalized whitespace
-        void output_tokens_normalized(std::ostream& os, const ContainerT& tokens) {
-            bool prev_was_whitespace = false;
+        // Helper function to format tokens for recording with intelligent spacing
+        std::string format_tokens_for_recording(const ContainerT& tokens) {
+            std::stringstream ss;
             bool need_space = false;
             
             for (const auto& tok : tokens) {
-                // Check if this is a whitespace token
-                if (IS_CATEGORY(tok, boost::wave::WhiteSpaceTokenType)) {
-                    // Mark that we've seen whitespace but don't output it yet
-                    if (!prev_was_whitespace && need_space) {
-                        // We need whitespace here
-                        prev_was_whitespace = true;
+                std::string val = tok.get_value().c_str();
+                
+                // Skip empty tokens
+                if (val.empty()) continue;
+                
+                // Determine if we need space before this token
+                if (need_space) {
+                    // Check if this token is an operator or punctuation that shouldn't have space before it
+                    char first = val[0];
+                    bool is_punctuation = (first == ',' || first == ';' || first == ')' || 
+                                          first == ']' || first == '}' || first == '.');
+                    bool is_scope = (val == "::");
+                    
+                    // Add space unless it's punctuation or scope operator
+                    if (!is_punctuation && !is_scope) {
+                        // Also check if previous token ended with ::
+                        ss << " ";
                     }
-                } else {
-                    // This is a non-whitespace token
-                    auto val = tok.get_value();
-                    
-                    // Add a single space if we had whitespace before this token
-                    if (prev_was_whitespace || need_space) {
-                        // Don't add space at the beginning or before certain punctuation
-                        if (!val.empty() && need_space) {
-                            char first_char = val.c_str()[0];
-                            if (first_char != ',' && first_char != ';' && first_char != ')' && 
-                                first_char != ']' && first_char != '}') {
-                                os << " ";
-                            }
-                        }
-                    }
-                    
-                    os << val;
-                    
-                    // Determine if we need space after this token
-                    if (!val.empty()) {
-                        char last_char = val.c_str()[val.size() - 1];
-                        need_space = (last_char != '(' && last_char != '[' && last_char != '{');
-                    } else {
-                        need_space = false;
-                    }
-                    
-                    prev_was_whitespace = false;
+                }
+                
+                ss << val;
+                
+                // Determine if we need space after this token
+                char last = val[val.length() - 1];
+                bool ends_with_open = (last == '(' || last == '[' || last == '{');
+                bool is_scope_op = (val == "::");
+                bool is_pointer_or_ref = (val == "*" || val == "&");
+                
+                // Need space after most tokens, except opening brackets and scope operators
+                need_space = !ends_with_open && !is_scope_op;
+                
+                // Special case: don't add space after :: or before ::
+                if (val.length() >= 2 && val.substr(val.length() - 2) == "::") {
+                    need_space = false;
                 }
             }
+            
+            return ss.str();
         }
 
         template <class ContextT>
@@ -289,68 +291,21 @@ namespace ppstep {
             }
         }
 
-        // Overloaded version with preserved tokens for recording
-        template <class ContextT>
-        void on_expand_function(ContextT& ctx, TokenT const& call, std::vector<ContainerT> const& arguments, 
-                               ContainerT call_tokens, std::vector<ContainerT> const& preserved_arguments, 
-                               ContainerT preserved_call_tokens) {
-            // Record function-like macro call if recording with normalized whitespace
-            if (recording_active) {
-                record_file << "[CALL] ";
-                output_tokens_normalized(record_file, preserved_call_tokens);
-                record_file << std::endl;
-                
-                // Record arguments with normalized whitespace
-                if (!preserved_arguments.empty()) {
-                    for (size_t i = 0; i < preserved_arguments.size(); ++i) {
-                        record_file << "  ARG[" << i << "]: ";
-                        output_tokens_normalized(record_file, preserved_arguments[i]);
-                        record_file << std::endl;
-                    }
-                }
-            }
-
-            // Continue with normal processing using sanitized tokens
-            if (token_stack.empty()) {
-                push(std::move(call_tokens), events::call<ContainerT>(call_tokens, lexed_tokens.size() + 0, lexed_tokens.size() + call_tokens.size()));
-            } else {
-                auto lookup = find_match_indices(token_stack.back(), call_tokens);
-                if (lookup) {
-                    auto [start, end] = *lookup;
-                    token_history.push_back(historical_event<ContainerT>(
-                        prepend_lexed(token_stack.back().tokens),
-                        events::call<ContainerT>(call_tokens, lexed_tokens.size() + start, lexed_tokens.size() + end)));
-                } else {
-                    reset_token_stack();
-                    push(std::move(call_tokens), events::call<ContainerT>(call_tokens, lexed_tokens.size() + 0, lexed_tokens.size() + call_tokens.size()));
-                }
-            }
-            
-            handle_prompt(ctx, call, preprocessing_event_type::CALL);
-        }
-        
-        // Keep original version for backward compatibility
         template <class ContextT>
         void on_expand_function(ContextT& ctx, TokenT const& call, std::vector<ContainerT> const& arguments, ContainerT call_tokens) {
-            // Fallback for when preserved versions aren't available
+            // Record function-like macro call if recording
             if (recording_active) {
-                record_file << "[CALL] ";
-                for (const auto& tok : call_tokens) {
-                    record_file << tok.get_value();
-                    record_file << " ";
-                }
-                record_file << std::endl;
+                record_file << "[CALL] " << format_tokens_for_recording(call_tokens);
                 
+                // Format arguments if present
                 if (!arguments.empty()) {
+                    record_file << " // Args: ";
                     for (size_t i = 0; i < arguments.size(); ++i) {
-                        record_file << "  ARG[" << i << "]: ";
-                        for (const auto& tok : arguments[i]) {
-                            record_file << tok.get_value();
-                            record_file << " ";
-                        }
-                        record_file << std::endl;
+                        if (i > 0) record_file << ", ";
+                        record_file << format_tokens_for_recording(arguments[i]);
                     }
                 }
+                record_file << std::endl;
             }
 
             if (token_stack.empty()) {
@@ -398,56 +353,12 @@ namespace ppstep {
             handle_prompt(ctx, call, preprocessing_event_type::CALL);
         }
 
-        // Overloaded version with preserved tokens
-        template <class ContextT>
-        void on_expanded(ContextT& ctx, ContainerT const& initial, ContainerT const& result,
-                        ContainerT const& preserved_initial, ContainerT const& preserved_result) {
-            // Record expansion with normalized whitespace
-            if (recording_active) {
-                record_file << "[EXPANDED]" << std::endl;
-                record_file << "  FROM: ";
-                output_tokens_normalized(record_file, preserved_initial);
-                record_file << std::endl;
-                record_file << "  TO:   ";
-                output_tokens_normalized(record_file, preserved_result);
-                record_file << std::endl;
-            }
-
-            // Continue with normal processing using sanitized tokens
-            try {
-                auto const& [tokens, start, end] = match(initial);
-
-                ContainerT new_tokens;
-                std::size_t new_start, new_end;
-                splice_between(*tokens, result, start, end, new_tokens, new_start, new_end);
-
-                push(std::move(new_tokens),
-                     std::next(new_tokens.begin(), new_start),
-                     events::expanded<ContainerT>(initial, lexed_tokens.size() + new_start, lexed_tokens.size() + new_end));
-
-            } catch (std::logic_error const&) {
-                push(ContainerT(result), events::expanded<ContainerT>(initial, lexed_tokens.size() + 0, lexed_tokens.size() + result.size()));
-            }
-
-            handle_prompt(ctx, *(initial.begin()), preprocessing_event_type::EXPANDED);
-        }
-        
-        // Keep original version for backward compatibility
         template <class ContextT>
         void on_expanded(ContextT& ctx, ContainerT const& initial, ContainerT const& result) {
-            // Fallback for when preserved versions aren't available
+            // Record expansion if recording
             if (recording_active) {
-                record_file << "[EXPANDED]" << std::endl;
-                record_file << "  FROM: ";
-                for (const auto& tok : initial) {
-                    record_file << tok.get_value() << " ";
-                }
-                record_file << std::endl;
-                record_file << "  TO:   ";
-                for (const auto& tok : result) {
-                    record_file << tok.get_value() << " ";
-                }
-                record_file << std::endl;
+                record_file << "[EXPANDED] " << format_tokens_for_recording(initial) 
+                           << " => " << format_tokens_for_recording(result) << std::endl;
             }
 
             try {
@@ -468,68 +379,15 @@ namespace ppstep {
             handle_prompt(ctx, *(initial.begin()), preprocessing_event_type::EXPANDED);
         }
 
-        // Overloaded version with preserved tokens
-        template <class ContextT>
-        void on_rescanned(ContextT& ctx, ContainerT const& cause, ContainerT const& initial, ContainerT const& result,
-                         ContainerT const& preserved_cause, ContainerT const& preserved_initial, ContainerT const& preserved_result) {
-            if (initial.empty()) return;
-
-            // Record rescan with normalized whitespace
-            if (recording_active) {
-                record_file << "[RESCANNED]" << std::endl;
-                record_file << "  FROM:      ";
-                output_tokens_normalized(record_file, preserved_initial);
-                record_file << std::endl;
-                record_file << "  TO:        ";
-                output_tokens_normalized(record_file, preserved_result);
-                record_file << std::endl;
-                record_file << "  CAUSED BY: ";
-                output_tokens_normalized(record_file, preserved_cause);
-                record_file << std::endl;
-            }
-
-            // Continue with normal processing using sanitized tokens
-            try {
-                auto const& [tokens, start, end] = match(initial);
-
-                ContainerT new_tokens;
-                std::size_t new_start, new_end;
-                splice_between(*tokens, result, start, end, new_tokens, new_start, new_end);
-                
-                push(std::move(new_tokens),
-                     std::next(new_tokens.begin(), new_start),
-                     events::rescanned<ContainerT>(cause, initial, lexed_tokens.size() + new_start, lexed_tokens.size() + new_end));
-
-            } catch (std::logic_error const&) {
-                push(ContainerT(result), events::rescanned<ContainerT>(cause, initial, lexed_tokens.size() + 0, lexed_tokens.size() + result.size()));
-            }
-
-            handle_prompt(ctx, *(initial.begin()), preprocessing_event_type::RESCANNED);
-        }
-        
-        // Keep original version for backward compatibility
         template <class ContextT>
         void on_rescanned(ContextT& ctx, ContainerT const& cause, ContainerT const& initial, ContainerT const& result) {
             if (initial.empty()) return;
 
-            // Fallback for when preserved versions aren't available
+            // Record rescan if recording
             if (recording_active) {
-                record_file << "[RESCANNED]" << std::endl;
-                record_file << "  FROM:      ";
-                for (const auto& tok : initial) {
-                    record_file << tok.get_value() << " ";
-                }
-                record_file << std::endl;
-                record_file << "  TO:        ";
-                for (const auto& tok : result) {
-                    record_file << tok.get_value() << " ";
-                }
-                record_file << std::endl;
-                record_file << "  CAUSED BY: ";
-                for (const auto& tok : cause) {
-                    record_file << tok.get_value() << " ";
-                }
-                record_file << std::endl;
+                record_file << "[RESCANNED] " << format_tokens_for_recording(initial) 
+                           << " => " << format_tokens_for_recording(result) 
+                           << " // Caused by: " << format_tokens_for_recording(cause) << std::endl;
             }
 
             try {
