@@ -72,7 +72,22 @@ namespace ppstep {
         template <class Attr>
         void start_record(Attr const& attr) {
             std::string filename(attr.begin(), attr.end());
-            if (cl.start_recording(filename)) {
+            std::cout << "DEBUG VIEW: start_record called with filename: '" << filename << "'" << std::endl;
+            
+            // Try to write a simple test file first from view
+            std::ofstream test_file("view_test.txt", std::ios::out | std::ios::trunc);
+            if (test_file.is_open()) {
+                test_file << "VIEW TEST WRITE" << std::endl;
+                test_file.close();
+                std::cout << "DEBUG VIEW: Test file written from view.hpp" << std::endl;
+            } else {
+                std::cout << "DEBUG VIEW: Could not create test file from view.hpp" << std::endl;
+            }
+            
+            bool result = cl.start_recording(filename);
+            std::cout << "DEBUG VIEW: cl.start_recording returned: " << (result ? "true" : "false") << std::endl;
+            
+            if (result) {
                 std::cout << "Recording to " << filename << std::endl;
             } else {
                 std::cout << "Failed to open " << filename << " for recording" << std::endl;
@@ -80,11 +95,13 @@ namespace ppstep {
         }
         
         void stop_record() {
+            std::cout << "DEBUG VIEW: stop_record called" << std::endl;
             cl.stop_recording();
             std::cout << "Recording stopped" << std::endl;
         }
         
         void status() {
+            std::cout << "DEBUG VIEW: status called" << std::endl;
             if (cl.is_recording()) {
                 std::cout << "Recording to: " << cl.get_record_filename() << std::endl;
             } else {
@@ -243,6 +260,8 @@ namespace ppstep {
             using ascii::space_type;
 
             auto anything = +(print);
+            
+            std::cout << "DEBUG VIEW: parse called with input: '" << std::string(first, last) << "'" << std::endl;
 
 #define PPSTEP_ACTION(...) ([this, &ctx](auto const& attr){ __VA_ARGS__; })
 
@@ -285,6 +304,7 @@ namespace ppstep {
             });
 
             bool r = phrase_parse(first, last, grammar, space);
+            std::cout << "DEBUG VIEW: parse result: " << (r ? "true" : "false") << ", remaining: '" << std::string(first, last) << "'" << std::endl;
             if (first != last) {
                 return false;
             }
@@ -311,13 +331,15 @@ namespace ppstep {
 
             for (char* raw_line; (raw_line = linenoise(prompt.c_str())) != nullptr;) {
                 linenoiseHistoryAdd(raw_line);
+                
+                std::cout << "DEBUG VIEW: prompt received input: '" << raw_line << "'" << std::endl;
 
                 bool valid = parse(ctx, raw_line, raw_line + std::strlen(raw_line));
                 if (!valid) {
                     std::cout << "Undefined command: \"" << raw_line << "\"." << std::endl;
                 }
 
-                std::free(static_cast<void*>(raw_line));
+                std::free(static_cast(void*)(raw_line));
 
                 if (valid) {
                     if (steps_requested) break;
