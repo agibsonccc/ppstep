@@ -194,6 +194,7 @@ namespace ppstep {
             record_file << "=== PPSTEP TRACE ===" << std::endl;
             record_file << "Started: " << std::ctime(&time_t);
             record_file << "===================" << std::endl << std::endl;
+            record_file.flush(); // Ensure header is written
             
             return true;
         }
@@ -201,6 +202,7 @@ namespace ppstep {
         void stop_recording() {
             if (recording_active) {
                 record_file << std::endl << "=== END OF TRACE ===" << std::endl;
+                record_file.flush(); // Explicitly flush buffer to disk
                 record_file.close();
                 recording_active = false;
                 record_filename.clear();
@@ -234,6 +236,7 @@ namespace ppstep {
                 // Record lexed token if recording
                 if (recording_active) {
                     record_file << "[LEXED] " << token.get_value() << std::endl;
+                    record_file.flush(); // Flush after each write for safety
                 }
 
                 handle_prompt(ctx, token, preprocessing_event_type::LEXED);
@@ -271,6 +274,7 @@ namespace ppstep {
                         record_file << std::endl;
                     }
                 }
+                record_file.flush(); // Flush after each write
             }
 
             // Continue with normal processing using sanitized tokens
@@ -314,6 +318,7 @@ namespace ppstep {
                         record_file << std::endl;
                     }
                 }
+                record_file.flush(); // Flush after each write
             }
 
             if (token_stack.empty()) {
@@ -341,6 +346,7 @@ namespace ppstep {
             // Record object-like macro call if recording
             if (recording_active) {
                 record_file << "[CALL] " << call.get_value() << std::endl;
+                record_file.flush(); // Flush after each write
             }
             
             if (token_stack.empty()) {
@@ -374,6 +380,7 @@ namespace ppstep {
                 record_file << "  TO:   ";
                 output_tokens_preserved(record_file, preserved_result);
                 record_file << std::endl;
+                record_file.flush(); // Flush after each write
             }
 
             // Continue with normal processing using sanitized tokens
@@ -411,6 +418,7 @@ namespace ppstep {
                     record_file << tok.get_value() << " ";
                 }
                 record_file << std::endl;
+                record_file.flush(); // Flush after each write
             }
 
             try {
@@ -449,6 +457,7 @@ namespace ppstep {
                 record_file << "  CAUSED BY: ";
                 output_tokens_preserved(record_file, preserved_cause);
                 record_file << std::endl;
+                record_file.flush(); // Flush after each write
             }
 
             // Continue with normal processing using sanitized tokens
@@ -493,6 +502,7 @@ namespace ppstep {
                     record_file << tok.get_value() << " ";
                 }
                 record_file << std::endl;
+                record_file.flush(); // Flush after each write
             }
 
             try {
@@ -521,6 +531,10 @@ namespace ppstep {
 
         template <class ContextT>
         void on_complete(ContextT& ctx) {
+            // If recording is active when preprocessing completes, ensure data is flushed
+            if (recording_active) {
+                record_file.flush();
+            }
             cli.prompt(ctx, "complete");
         }
         
