@@ -221,7 +221,7 @@ namespace ppstep {
             
             std::stringstream ss;
             auto it = tokens.begin();
-            auto prev_val = it->get_value().c_str();
+            std::string prev_val = it->get_value().c_str();
             ss << prev_val;
             ++it;
             
