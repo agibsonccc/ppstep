@@ -173,6 +173,13 @@ namespace ppstep {
         client(server_state<ContainerT>& state, std::string prefix) : state(&state), cli(client_cli<TokenT, ContainerT>(*this, std::move(prefix))), mode(stepping_mode::FREE), recording_active(false) {}
         
         client(server_state<ContainerT>& state) : client(state, "") {}
+        
+        // Destructor to ensure recording is properly closed
+        ~client() {
+            if (recording_active) {
+                finalize_recording();
+            }
+        }
 
         // Recording functionality
         bool start_recording(const std::string& filename) {
@@ -201,11 +208,7 @@ namespace ppstep {
         
         void stop_recording() {
             if (recording_active) {
-                record_file << std::endl << "=== END OF TRACE ===" << std::endl;
-                record_file.flush(); // Explicitly flush buffer to disk
-                record_file.close();
-                recording_active = false;
-                record_filename.clear();
+                finalize_recording();
             }
         }
         
@@ -531,10 +534,31 @@ namespace ppstep {
 
         template <class ContextT>
         void on_complete(ContextT& ctx) {
-            // If recording is active when preprocessing completes, ensure data is flushed
+            // If recording is active when preprocessing completes, write final output
             if (recording_active) {
-                record_file.flush();
+                record_file << std::endl;
+                record_file << "[PREPROCESSING COMPLETE]" << std::endl;
+                
+                // Write the final preprocessed output
+                if (!lexed_tokens.empty()) {
+                    record_file << std::endl;
+                    record_file << "=== FINAL OUTPUT ===" << std::endl;
+                    for (const auto& tok : lexed_tokens) {
+                        record_file << tok.get_value();
+                    }
+                    record_file << std::endl;
+                    record_file << "====================" << std::endl;
+                }
+                
+                // Add completion timestamp
+                auto now = std::chrono::system_clock::now();
+                auto time_t = std::chrono::system_clock::to_time_t(now);
+                record_file << std::endl;
+                record_file << "Completed: " << std::ctime(&time_t);
+                
+                record_file.flush(); // Ensure everything is written
             }
+            
             cli.prompt(ctx, "complete");
         }
         
@@ -590,6 +614,17 @@ namespace ppstep {
         using container_iterator = typename ContainerT::const_iterator;
         
         using range_container = std::tuple<ContainerT const*, container_iterator, container_iterator>;
+        
+        // Helper function to finalize recording
+        void finalize_recording() {
+            if (recording_active && record_file.is_open()) {
+                record_file << std::endl << "=== END OF TRACE ===" << std::endl;
+                record_file.flush(); // Explicitly flush buffer to disk
+                record_file.close();
+                recording_active = false;
+                record_filename.clear();
+            }
+        }
 
         ContainerT prepend_lexed(ContainerT const& tokens) {
             auto acc = ContainerT(std::begin(lexed_tokens), std::end(lexed_tokens));
