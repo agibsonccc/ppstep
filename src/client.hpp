@@ -16,8 +16,6 @@
 #include <chrono>
 #include <ctime>
 #include <iomanip>
-#include <cstdio>
-#include <unistd.h>  // For getcwd
 
 #include "server_fwd.hpp"
 #include "client_fwd.hpp"
@@ -172,75 +170,40 @@ namespace ppstep {
     
     template <class TokenT, class ContainerT>
     struct client {
-        client(server_state<ContainerT>& state, std::string prefix) : state(&state), cli(client_cli<TokenT, ContainerT>(*this, std::move(prefix))), mode(stepping_mode::FREE), recording_active(false), record_file_c(nullptr) {}
+        client(server_state<ContainerT>& state, std::string prefix) : state(&state), cli(client_cli<TokenT, ContainerT>(*this, std::move(prefix))), mode(stepping_mode::FREE), recording_active(false) {}
         
         client(server_state<ContainerT>& state) : client(state, "") {}
-        
-        // Destructor to ensure recording is properly closed
-        ~client() {
-            if (recording_active) {
-                finalize_recording();
-            }
-        }
 
-        // Recording functionality - DIAGNOSTIC VERSION
+        // Recording functionality
         bool start_recording(const std::string& filename) {
             if (recording_active) {
                 stop_recording();
             }
             
-            // Show current working directory
-            char cwd[1024];
-            if (getcwd(cwd, sizeof(cwd)) != NULL) {
-                std::cout << "Current working directory: " << cwd << std::endl;
-            }
-            
-            // Use absolute path if relative
-            std::string full_path = filename;
-            if (filename[0] != '/') {
-                full_path = std::string(cwd) + "/" + filename;
-            }
-            std::cout << "Full path: " << full_path << std::endl;
-            
-            // TEST 1: Create initial file
-            FILE* test = fopen(full_path.c_str(), "w");
-            if (test) {
-                fprintf(test, "TEST WRITE SUCCESS\n");
-                fclose(test);
-                std::cout << "TEST FILE WRITTEN - CHECK " << full_path << std::endl;
-            } else {
-                std::cout << "FAILED TO CREATE TEST FILE at " << full_path << std::endl;
-                perror("fopen error");
+            record_file.open(filename, std::ios::out | std::ios::trunc);
+            if (!record_file.is_open()) {
                 return false;
             }
-            
-            // Now open for actual recording
-            record_file_c = fopen(full_path.c_str(), "a");  // Append mode
-            if (!record_file_c) {
-                std::cout << "Failed to reopen for append at " << full_path << std::endl;
-                perror("fopen append error");
-                return false;
-            }
-            
-            std::cout << "File reopened successfully for append" << std::endl;
             
             recording_active = true;
-            record_filename = full_path;
+            record_filename = filename;
             
-            // Write header
-            fprintf(record_file_c, "\n=== PPSTEP TRACE ===\n");
-            fprintf(record_file_c, "Recording started\n");
-            fflush(record_file_c);
-            
-            std::cout << "Recording is now ACTIVE, file handle is OPEN" << std::endl;
+            // Write header with timestamp
+            auto now = std::chrono::system_clock::now();
+            auto time_t = std::chrono::system_clock::to_time_t(now);
+            record_file << "=== PPSTEP TRACE ===" << std::endl;
+            record_file << "Started: " << std::ctime(&time_t);
+            record_file << "===================" << std::endl << std::endl;
             
             return true;
         }
         
         void stop_recording() {
             if (recording_active) {
-                std::cout << "Stopping recording, finalizing file: " << record_filename << std::endl;
-                finalize_recording();
+                record_file << std::endl << "=== END OF TRACE ===" << std::endl;
+                record_file.close();
+                recording_active = false;
+                record_filename.clear();
             }
         }
         
@@ -252,10 +215,47 @@ namespace ppstep {
             return record_filename;
         }
         
-        // Helper function to output tokens preserving whitespace
-        void output_tokens_preserved(FILE* fp, const ContainerT& tokens) {
+        // Helper function to output tokens with normalized whitespace
+        void output_tokens_normalized(std::ostream& os, const ContainerT& tokens) {
+            bool prev_was_whitespace = false;
+            bool need_space = false;
+            
             for (const auto& tok : tokens) {
-                fprintf(fp, "%s", tok.get_value().c_str());
+                // Check if this is a whitespace token
+                if (IS_CATEGORY(tok, boost::wave::WhiteSpaceTokenType)) {
+                    // Mark that we've seen whitespace but don't output it yet
+                    if (!prev_was_whitespace && need_space) {
+                        // We need whitespace here
+                        prev_was_whitespace = true;
+                    }
+                } else {
+                    // This is a non-whitespace token
+                    auto val = tok.get_value();
+                    
+                    // Add a single space if we had whitespace before this token
+                    if (prev_was_whitespace || need_space) {
+                        // Don't add space at the beginning or before certain punctuation
+                        if (!val.empty() && need_space) {
+                            char first_char = val.c_str()[0];
+                            if (first_char != ',' && first_char != ';' && first_char != ')' && 
+                                first_char != ']' && first_char != '}') {
+                                os << " ";
+                            }
+                        }
+                    }
+                    
+                    os << val;
+                    
+                    // Determine if we need space after this token
+                    if (!val.empty()) {
+                        char last_char = val.c_str()[val.size() - 1];
+                        need_space = (last_char != '(' && last_char != '[' && last_char != '{');
+                    } else {
+                        need_space = false;
+                    }
+                    
+                    prev_was_whitespace = false;
+                }
             }
         }
 
@@ -268,15 +268,9 @@ namespace ppstep {
                 lexed_tokens.push_back(token);
                 token_history.push_back(historical_event<ContainerT>(last_tokens, events::lexed<ContainerT>()));
 
-                // Record lexed token if recording - with diagnostics
+                // Record lexed token if recording
                 if (recording_active) {
-                    if (record_file_c) {
-                        fprintf(record_file_c, "[LEXED] %s\n", token.get_value().c_str());
-                        fflush(record_file_c);
-                        std::cout << "WROTE TO FILE: [LEXED] " << token.get_value() << std::endl;
-                    } else {
-                        std::cout << "ERROR: record_file_c is NULL despite recording_active=true!" << std::endl;
-                    }
+                    record_file << "[LEXED] " << token.get_value() << std::endl;
                 }
 
                 handle_prompt(ctx, token, preprocessing_event_type::LEXED);
@@ -300,13 +294,20 @@ namespace ppstep {
         void on_expand_function(ContextT& ctx, TokenT const& call, std::vector<ContainerT> const& arguments, 
                                ContainerT call_tokens, std::vector<ContainerT> const& preserved_arguments, 
                                ContainerT preserved_call_tokens) {
-            // Record function-like macro call if recording
-            if (recording_active && record_file_c) {
-                fprintf(record_file_c, "[CALL-FUNC] ");
-                output_tokens_preserved(record_file_c, preserved_call_tokens);
-                fprintf(record_file_c, "\n");
-                fflush(record_file_c);
-                std::cout << "WROTE TO FILE: [CALL-FUNC]" << std::endl;
+            // Record function-like macro call if recording with normalized whitespace
+            if (recording_active) {
+                record_file << "[CALL] ";
+                output_tokens_normalized(record_file, preserved_call_tokens);
+                record_file << std::endl;
+                
+                // Record arguments with normalized whitespace
+                if (!preserved_arguments.empty()) {
+                    for (size_t i = 0; i < preserved_arguments.size(); ++i) {
+                        record_file << "  ARG[" << i << "]: ";
+                        output_tokens_normalized(record_file, preserved_arguments[i]);
+                        record_file << std::endl;
+                    }
+                }
             }
 
             // Continue with normal processing using sanitized tokens
@@ -331,11 +332,25 @@ namespace ppstep {
         // Keep original version for backward compatibility
         template <class ContextT>
         void on_expand_function(ContextT& ctx, TokenT const& call, std::vector<ContainerT> const& arguments, ContainerT call_tokens) {
-            // Fallback
-            if (recording_active && record_file_c) {
-                fprintf(record_file_c, "[CALL-FUNC-FALLBACK]\n");
-                fflush(record_file_c);
-                std::cout << "WROTE TO FILE: [CALL-FUNC-FALLBACK]" << std::endl;
+            // Fallback for when preserved versions aren't available
+            if (recording_active) {
+                record_file << "[CALL] ";
+                for (const auto& tok : call_tokens) {
+                    record_file << tok.get_value();
+                    record_file << " ";
+                }
+                record_file << std::endl;
+                
+                if (!arguments.empty()) {
+                    for (size_t i = 0; i < arguments.size(); ++i) {
+                        record_file << "  ARG[" << i << "]: ";
+                        for (const auto& tok : arguments[i]) {
+                            record_file << tok.get_value();
+                            record_file << " ";
+                        }
+                        record_file << std::endl;
+                    }
+                }
             }
 
             if (token_stack.empty()) {
@@ -360,11 +375,9 @@ namespace ppstep {
         void on_expand_object(ContextT& ctx, TokenT const& call) {
             auto call_tokens = ContainerT{call};
             
-            // Record object-like macro call
-            if (recording_active && record_file_c) {
-                fprintf(record_file_c, "[CALL-OBJ] %s\n", call.get_value().c_str());
-                fflush(record_file_c);
-                std::cout << "WROTE TO FILE: [CALL-OBJ] " << call.get_value() << std::endl;
+            // Record object-like macro call if recording
+            if (recording_active) {
+                record_file << "[CALL] " << call.get_value() << std::endl;
             }
             
             if (token_stack.empty()) {
@@ -389,11 +402,15 @@ namespace ppstep {
         template <class ContextT>
         void on_expanded(ContextT& ctx, ContainerT const& initial, ContainerT const& result,
                         ContainerT const& preserved_initial, ContainerT const& preserved_result) {
-            // Record expansion
-            if (recording_active && record_file_c) {
-                fprintf(record_file_c, "[EXPANDED]\n");
-                fflush(record_file_c);
-                std::cout << "WROTE TO FILE: [EXPANDED]" << std::endl;
+            // Record expansion with normalized whitespace
+            if (recording_active) {
+                record_file << "[EXPANDED]" << std::endl;
+                record_file << "  FROM: ";
+                output_tokens_normalized(record_file, preserved_initial);
+                record_file << std::endl;
+                record_file << "  TO:   ";
+                output_tokens_normalized(record_file, preserved_result);
+                record_file << std::endl;
             }
 
             // Continue with normal processing using sanitized tokens
@@ -418,11 +435,19 @@ namespace ppstep {
         // Keep original version for backward compatibility
         template <class ContextT>
         void on_expanded(ContextT& ctx, ContainerT const& initial, ContainerT const& result) {
-            // Fallback
-            if (recording_active && record_file_c) {
-                fprintf(record_file_c, "[EXPANDED-FALLBACK]\n");
-                fflush(record_file_c);
-                std::cout << "WROTE TO FILE: [EXPANDED-FALLBACK]" << std::endl;
+            // Fallback for when preserved versions aren't available
+            if (recording_active) {
+                record_file << "[EXPANDED]" << std::endl;
+                record_file << "  FROM: ";
+                for (const auto& tok : initial) {
+                    record_file << tok.get_value() << " ";
+                }
+                record_file << std::endl;
+                record_file << "  TO:   ";
+                for (const auto& tok : result) {
+                    record_file << tok.get_value() << " ";
+                }
+                record_file << std::endl;
             }
 
             try {
@@ -449,11 +474,18 @@ namespace ppstep {
                          ContainerT const& preserved_cause, ContainerT const& preserved_initial, ContainerT const& preserved_result) {
             if (initial.empty()) return;
 
-            // Record rescan
-            if (recording_active && record_file_c) {
-                fprintf(record_file_c, "[RESCANNED]\n");
-                fflush(record_file_c);
-                std::cout << "WROTE TO FILE: [RESCANNED]" << std::endl;
+            // Record rescan with normalized whitespace
+            if (recording_active) {
+                record_file << "[RESCANNED]" << std::endl;
+                record_file << "  FROM:      ";
+                output_tokens_normalized(record_file, preserved_initial);
+                record_file << std::endl;
+                record_file << "  TO:        ";
+                output_tokens_normalized(record_file, preserved_result);
+                record_file << std::endl;
+                record_file << "  CAUSED BY: ";
+                output_tokens_normalized(record_file, preserved_cause);
+                record_file << std::endl;
             }
 
             // Continue with normal processing using sanitized tokens
@@ -480,11 +512,24 @@ namespace ppstep {
         void on_rescanned(ContextT& ctx, ContainerT const& cause, ContainerT const& initial, ContainerT const& result) {
             if (initial.empty()) return;
 
-            // Fallback
-            if (recording_active && record_file_c) {
-                fprintf(record_file_c, "[RESCANNED-FALLBACK]\n");
-                fflush(record_file_c);
-                std::cout << "WROTE TO FILE: [RESCANNED-FALLBACK]" << std::endl;
+            // Fallback for when preserved versions aren't available
+            if (recording_active) {
+                record_file << "[RESCANNED]" << std::endl;
+                record_file << "  FROM:      ";
+                for (const auto& tok : initial) {
+                    record_file << tok.get_value() << " ";
+                }
+                record_file << std::endl;
+                record_file << "  TO:        ";
+                for (const auto& tok : result) {
+                    record_file << tok.get_value() << " ";
+                }
+                record_file << std::endl;
+                record_file << "  CAUSED BY: ";
+                for (const auto& tok : cause) {
+                    record_file << tok.get_value() << " ";
+                }
+                record_file << std::endl;
             }
 
             try {
@@ -496,7 +541,7 @@ namespace ppstep {
                 
                 push(std::move(new_tokens),
                      std::next(new_tokens.begin(), new_start),
-                     events::rescanned<ContainerT>(cause, initial, lexed_tokens.size() + 0, lexed_tokens.size() + result.size()));
+                     events::rescanned<ContainerT>(cause, initial, lexed_tokens.size() + new_start, lexed_tokens.size() + new_end));
 
             } catch (std::logic_error const&) {
                 push(ContainerT(result), events::rescanned<ContainerT>(cause, initial, lexed_tokens.size() + 0, lexed_tokens.size() + result.size()));
@@ -513,13 +558,6 @@ namespace ppstep {
 
         template <class ContextT>
         void on_complete(ContextT& ctx) {
-            // Write final output if recording
-            if (recording_active && record_file_c) {
-                fprintf(record_file_c, "\n[COMPLETE]\n");
-                fflush(record_file_c);
-                std::cout << "WROTE TO FILE: [COMPLETE]" << std::endl;
-            }
-            
             cli.prompt(ctx, "complete");
         }
         
@@ -575,19 +613,6 @@ namespace ppstep {
         using container_iterator = typename ContainerT::const_iterator;
         
         using range_container = std::tuple<ContainerT const*, container_iterator, container_iterator>;
-        
-        // Helper function to finalize recording
-        void finalize_recording() {
-            if (recording_active && record_file_c) {
-                fprintf(record_file_c, "\n=== END ===\n");
-                fflush(record_file_c);
-                fclose(record_file_c);
-                record_file_c = nullptr;
-                recording_active = false;
-                std::cout << "File closed. Check: " << record_filename << std::endl;
-                record_filename.clear();
-            }
-        }
 
         ContainerT prepend_lexed(ContainerT const& tokens) {
             auto acc = ContainerT(std::begin(lexed_tokens), std::end(lexed_tokens));
@@ -714,7 +739,6 @@ namespace ppstep {
         
         // Recording state
         std::ofstream record_file;
-        FILE* record_file_c;
         bool recording_active;
         std::string record_filename;
     };
