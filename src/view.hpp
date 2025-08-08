@@ -247,7 +247,7 @@ namespace ppstep {
 #define PPSTEP_ACTION(...) ([this, &ctx](auto const& attr){ __VA_ARGS__; })
 
             qi::rule<Iterator, ascii::space_type> grammar =
-                // PUT RECORDING COMMANDS FIRST BEFORE OTHER COMMANDS
+                // Recording commands
                   lexeme[(lit("record") | lit("rec")) > +space > anything[PPSTEP_ACTION(start_record(attr))]]
               | (lit("stoprecord") | lit("sr"))[PPSTEP_ACTION(stop_record())]
               | lit("status")[PPSTEP_ACTION(status())]
