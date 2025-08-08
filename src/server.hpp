@@ -39,22 +39,6 @@ namespace ppstep {
             }
             return acc;
         }
-        
-        // New method that preserves whitespace for recording
-        inline ContainerT preserve_whitespace(ContainerT const& tokens) {
-            auto acc = ContainerT();
-            for (auto const& token : tokens) {
-                // Only skip EOF, placemarkers, and invalid tokens
-                if (IS_CATEGORY(token, boost::wave::EOFTokenType)
-                    || (boost::wave::token_id(token) == boost::wave::T_PLACEMARKER)
-                    || !token.is_valid()) {
-                    continue;
-                }
-                // Keep whitespace tokens for recording
-                acc.push_back(token);
-            }
-            return acc;
-        }
 
         template <typename ContextT, typename IteratorT>
         bool expanding_function_like_macro(
@@ -69,12 +53,6 @@ namespace ppstep {
             for (auto const& arg_container : arguments) {
                 sanitized_arguments.push_back(sanitize(arg_container));
             }
-            
-            // Keep original with whitespace for recording
-            auto preserved_arguments = std::vector<ContainerT>();
-            for (auto const& arg_container : arguments) {
-                preserved_arguments.push_back(preserve_whitespace(arg_container));
-            }
 
             auto full_call = ContainerT(seqstart, seqend);
             {
@@ -83,16 +61,8 @@ namespace ppstep {
                 full_call = sanitize(full_call);
             }
             
-            // Create preserved version for recording
-            auto full_call_preserved = ContainerT(seqstart, seqend);
-            {
-                full_call_preserved.push_front(macrocall);
-                full_call_preserved.push_back(*seqend);
-                full_call_preserved = preserve_whitespace(full_call_preserved);
-            }
-            
             if (!debug) {
-                sink->on_expand_function(ctx, macrodef, sanitized_arguments, full_call, preserved_arguments, full_call_preserved);
+                sink->on_expand_function(ctx, macrodef, sanitized_arguments, full_call);
             } else {
                 std::cout << "F: ";
                 print_token_container(std::cout, full_call) << std::endl;
@@ -127,9 +97,7 @@ namespace ppstep {
             auto const& initial = *(state->expanding.rbegin());
             
             if (!debug) {
-                 // Pass both sanitized and preserved versions
-                 sink->on_expanded(ctx, sanitize(initial), sanitize(result), 
-                                  preserve_whitespace(initial), preserve_whitespace(result));
+                 sink->on_expanded(ctx, sanitize(initial), sanitize(result));
             } else {
                 std::cout << "E: ";
                 print_token_container(std::cout, sanitize(initial)) << " -> ";
@@ -148,9 +116,7 @@ namespace ppstep {
             auto const& [cause, initial] = *(state->rescanning.rbegin());
 
             if (!debug) {
-                // Pass both sanitized and preserved versions
-                sink->on_rescanned(ctx, sanitize(cause), sanitize(initial), sanitize(result),
-                                  preserve_whitespace(cause), preserve_whitespace(initial), preserve_whitespace(result));
+                sink->on_rescanned(ctx, sanitize(cause), sanitize(initial), sanitize(result));
             } else {
                 std::cout << "R: ";
                 print_token_container(std::cout, sanitize(initial)) << " -> ";
