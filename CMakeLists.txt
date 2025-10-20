@@ -25,70 +25,44 @@ if(DEFINED BOOST_ROOT)
         set(Boost_LIBRARY_DIR "${BOOST_ROOT}/lib")
     endif()
     
-    # Find libraries manually with flexible naming (handles -mt, version suffixes, etc.)
-    find_library(Boost_SYSTEM_LIBRARY 
-        NAMES boost_system-mt boost_system boost_system-mt-x64 boost_system-x64
-        PATHS ${Boost_LIBRARY_DIR} 
-        NO_DEFAULT_PATH)
+    # Find libraries manually - NOTE: system is header-only in Boost 1.69+
     find_library(Boost_FILESYSTEM_LIBRARY 
-        NAMES boost_filesystem-mt boost_filesystem boost_filesystem-mt-x64 boost_filesystem-x64
+        NAMES boost_filesystem
         PATHS ${Boost_LIBRARY_DIR} 
-        NO_DEFAULT_PATH)
+        NO_DEFAULT_PATH
+        REQUIRED)
     find_library(Boost_PROGRAM_OPTIONS_LIBRARY 
-        NAMES boost_program_options-mt boost_program_options boost_program_options-mt-x64 boost_program_options-x64
+        NAMES boost_program_options
         PATHS ${Boost_LIBRARY_DIR} 
-        NO_DEFAULT_PATH)
+        NO_DEFAULT_PATH
+        REQUIRED)
     find_library(Boost_THREAD_LIBRARY 
-        NAMES boost_thread-mt boost_thread boost_thread-mt-x64 boost_thread-x64
+        NAMES boost_thread
         PATHS ${Boost_LIBRARY_DIR} 
-        NO_DEFAULT_PATH)
+        NO_DEFAULT_PATH
+        REQUIRED)
     find_library(Boost_WAVE_LIBRARY 
-        NAMES boost_wave-mt boost_wave boost_wave-mt-x64 boost_wave-x64
+        NAMES boost_wave
         PATHS ${Boost_LIBRARY_DIR} 
-        NO_DEFAULT_PATH)
-    
-    # Diagnostic: list what's actually in the lib directory
-    file(GLOB LIB_FILES "${Boost_LIBRARY_DIR}/libboost_*")
-    message(STATUS "Libraries found in ${Boost_LIBRARY_DIR}:")
-    foreach(lib ${LIB_FILES})
-        get_filename_component(lib_name ${lib} NAME)
-        message(STATUS "  ${lib_name}")
-    endforeach()
-    
-    # Check that we found all required libraries
-    if(NOT Boost_SYSTEM_LIBRARY)
-        message(FATAL_ERROR "Could not find boost_system in ${Boost_LIBRARY_DIR}")
-    endif()
-    if(NOT Boost_FILESYSTEM_LIBRARY)
-        message(FATAL_ERROR "Could not find boost_filesystem in ${Boost_LIBRARY_DIR}")
-    endif()
-    if(NOT Boost_PROGRAM_OPTIONS_LIBRARY)
-        message(FATAL_ERROR "Could not find boost_program_options in ${Boost_LIBRARY_DIR}")
-    endif()
-    if(NOT Boost_THREAD_LIBRARY)
-        message(FATAL_ERROR "Could not find boost_thread in ${Boost_LIBRARY_DIR}")
-    endif()
-    if(NOT Boost_WAVE_LIBRARY)
-        message(FATAL_ERROR "Could not find boost_wave in ${Boost_LIBRARY_DIR}")
-    endif()
+        NO_DEFAULT_PATH
+        REQUIRED)
     
     # Set Boost variables manually
     set(Boost_FOUND TRUE)
     set(Boost_INCLUDE_DIRS "${Boost_INCLUDE_DIR}")
     set(Boost_LIBRARIES 
-        ${Boost_SYSTEM_LIBRARY}
         ${Boost_FILESYSTEM_LIBRARY}
         ${Boost_PROGRAM_OPTIONS_LIBRARY}
         ${Boost_THREAD_LIBRARY}
         ${Boost_WAVE_LIBRARY}
     )
     
-    message(STATUS "✅ Boost configured manually")
+    message(STATUS "✅ Boost configured manually (system is header-only)")
     message(STATUS "   Include: ${Boost_INCLUDE_DIRS}")
     message(STATUS "   Libraries: ${Boost_LIBRARIES}")
 else()
     # Fall back to standard FindBoost
-    find_package(Boost COMPONENTS system filesystem program_options thread wave REQUIRED)
+    find_package(Boost COMPONENTS filesystem program_options thread wave REQUIRED)
     
     if(NOT Boost_FOUND)
         message(FATAL_ERROR "Boost not found!")
