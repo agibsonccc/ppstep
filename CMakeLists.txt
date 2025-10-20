@@ -1,6 +1,9 @@
 cmake_minimum_required(VERSION 3.5)
 project(ppstep)
 
+# Option to enable AddressSanitizer
+option(ENABLE_ASAN "Enable AddressSanitizer for debugging memory issues" ON)
+
 # Use passed-in Boost paths if provided
 if(DEFINED BOOST_ROOT)
     message(STATUS "Using BOOST_ROOT: ${BOOST_ROOT}")
@@ -81,6 +84,29 @@ add_executable(ppstep ${sources} ${external_sources})
 target_include_directories(ppstep PUBLIC src external ${Boost_INCLUDE_DIRS})
 
 target_compile_options(ppstep PUBLIC -std=c++17)
+
+# AddressSanitizer configuration
+if(ENABLE_ASAN)
+    message(STATUS "🔍 AddressSanitizer ENABLED")
+    
+    # Compiler flags for ASan
+    target_compile_options(ppstep PUBLIC 
+        -fsanitize=address 
+        -fno-omit-frame-pointer
+        -g
+        -O1
+    )
+    
+    # Linker flags for ASan
+    target_link_options(ppstep PUBLIC 
+        -fsanitize=address
+    )
+    
+    message(STATUS "   Compile flags: -fsanitize=address -fno-omit-frame-pointer -g -O1")
+    message(STATUS "   Link flags: -fsanitize=address")
+else()
+    message(STATUS "AddressSanitizer disabled (use -DENABLE_ASAN=ON to enable)")
+endif()
 
 target_link_libraries(ppstep PUBLIC ${Boost_LIBRARIES})
 
