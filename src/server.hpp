@@ -12,10 +12,11 @@
 namespace ppstep {
     template <class ContainerT>
     struct server_state {
-        server_state() : expanding(), rescanning() {}
+        server_state() : expanding(), rescanning(), disable_printing(false) {}
 
         std::vector<ContainerT> expanding;
         std::vector<std::pair<ContainerT, ContainerT>> rescanning;
+        bool disable_printing;  // Set to true after errors to prevent crashes
     };
 
     template <typename TokenT, typename ContainerT>
@@ -105,6 +106,7 @@ namespace ppstep {
             } catch (...) {
                 // Any exception in hook processing means corrupted state
                 fatal_error_occurred = true;
+                state->disable_printing = true;
             }
 
             return false;
@@ -127,6 +129,7 @@ namespace ppstep {
                 state->expanding.push_back({macrocall});
             } catch (...) {
                 fatal_error_occurred = true;
+                state->disable_printing = true;
             }
             
             return false;
@@ -153,6 +156,7 @@ namespace ppstep {
                 state->expanding.pop_back();
             } catch (...) {
                 fatal_error_occurred = true;
+                state->disable_printing = true;
             }
         }
 
@@ -176,6 +180,7 @@ namespace ppstep {
                 state->rescanning.pop_back();
             } catch (...) {
                 fatal_error_occurred = true;
+                state->disable_printing = true;
             }
         }
         
@@ -292,9 +297,7 @@ namespace ppstep {
             }
         }
         
-        // Log the error and LET THE EXCEPTION BE THROWN
-        // We'll catch it cleanly in the main loop and stop gracefully
-        // This prevents segfaults from trying to use corrupted Wave state
+        // Log the error, disable printing, and let the exception be thrown
         template <typename ContextT, typename ExceptionT>
         bool throw_exception(ContextT& ctx, ExceptionT const& e) {
             // Extract error information
@@ -342,15 +345,27 @@ namespace ppstep {
                 column = 0;
             }
             
-            // Just log it - don't try to classify or make decisions
-            std::cerr << "⚠️  " << file << ":" << line;
-            if (column > 0) std::cerr << ":" << column;
-            std::cerr << " - " << error_msg << std::endl;
+            // Check if this is a warning or an error
+            bool is_warning = (error_msg.find("warning:") != std::string::npos);
             
-            // Return TRUE = throw the exception
-            // The main loop will catch it and stop gracefully
-            // This prevents segfaults from corrupted Wave state
-            return true;
+            if (is_warning) {
+                // Log the warning
+                std::cerr << "⚠️  " << file << ":" << line;
+                if (column > 0) std::cerr << ":" << column;
+                std::cerr << " - " << error_msg << std::endl;
+                
+                // Return FALSE = suppress the exception, continue processing
+                return false;
+            } else {
+                // Fatal error - log it
+                std::cerr << "❌ " << file << ":" << line;
+                if (column > 0) std::cerr << ":" << column;
+                std::cerr << " - " << error_msg << std::endl;
+                std::cerr << "⚠️  Preprocessing could not continue after fatal error." << std::endl;
+                
+                // CRITICAL: Don't return to Wave with corrupted iterator - exit immediately
+                std::exit(1);
+            }
         }
 
         template <typename ContextT>
