@@ -297,7 +297,7 @@ namespace ppstep {
             }
         }
         
-        // Log the error and decide whether to suppress or throw based on severity
+        // Log the error and always throw (even for warnings) because Wave's iterator gets corrupted
         template <typename ContextT, typename ExceptionT>
         bool throw_exception(ContextT& ctx, ExceptionT const& e) {
             // Extract error information
@@ -368,16 +368,10 @@ namespace ppstep {
             if (column > 0) std::cerr << ":" << column;
             std::cerr << " - " << error_msg << std::endl;
             
-            // Decision: suppress warnings and remarks, throw everything else
-            if (severity == boost::wave::util::severity_remark ||
-                severity == boost::wave::util::severity_warning) {
-                // Return FALSE = suppress the exception, continue processing
-                return false;
-            } else {
-                // Return TRUE = throw the exception (will be caught in main loop)
-                state->disable_printing = true;
-                return true;
-            }
+            // CRITICAL: Wave's iterator becomes corrupted after ANY exception (even warnings)
+            // Return TRUE for everything so the exception is caught cleanly in main loop
+            state->disable_printing = true;
+            return true;
         }
 
         template <typename ContextT>
