@@ -385,6 +385,9 @@ namespace ppstep {
         void complete(ContextT& ctx) {
             if (debug) return;
 
+            // CRITICAL: Don't try to print event history if tokens are corrupted
+            if (state->disable_printing) return;
+
             sink->on_complete(ctx);
         }
 
