@@ -181,7 +181,11 @@ namespace ppstep {
             std::size_t idx = 0;
             for (auto it = expanding.rbegin(); it != expanding.rend(); ++it, ++idx) {
                 std::cout << idx << ": ";
-                print_token_container(std::cout, *it) << std::endl;
+                try {
+                    print_token_container(std::cout, *it) << std::endl;
+                } catch (...) {
+                    std::cout << "<error_printing_tokens>" << std::endl;
+                }
             }
         }
         
@@ -192,14 +196,22 @@ namespace ppstep {
             for (auto it = rescanning.rbegin(); it != rescanning.rend(); ++it, ++idx) {
                 auto const& [cause, initial] = *it;
                 std::cout << idx << ": ";
-                print_token_container(std::cout, initial) << '\n';
+                try {
+                    print_token_container(std::cout, initial) << '\n';
+                } catch (...) {
+                    std::cout << "<error_printing_tokens>\n";
+                }
                 
                 std::size_t padding_width = idx == 0 ? 1 : 0;
                 for (std::size_t i = idx; i != 0; i /= 10) {
                     ++padding_width;
                 }
                 std::cout << std::string(padding_width, ' ') << "  caused by ";
-                print_token_container(std::cout, cause) << std::endl;
+                try {
+                    print_token_container(std::cout, cause) << std::endl;
+                } catch (...) {
+                    std::cout << "<error_printing_tokens>" << std::endl;
+                }
             }
         }
 
@@ -212,7 +224,11 @@ namespace ppstep {
             if (latest == cl.oldest_history())
                 return;
             
-            std::visit([&latest](auto const& event){ event.explain(std::cout); }, latest->event);
+            try {
+                std::visit([&latest](auto const& event){ event.explain(std::cout); }, latest->event);
+            } catch (...) {
+                std::cout << "<error_explaining_state>" << std::endl;
+            }
         }
 
         template <class ContextT>
@@ -221,10 +237,20 @@ namespace ppstep {
             if (latest == cl.oldest_history())
                 return;
             
-            auto pos = ctx.get_main_pos();
-            auto pos_file = boost::filesystem::path(pos.get_file().begin(), pos.get_file().end()).filename().string();
-            std::cout << '[' << pos_file << ':' << pos.get_line() << ':'  << pos.get_column() << "]: ";
-            std::visit([&latest](auto const& event){ event.print(std::cout, latest->tokens); }, latest->event);
+            try {
+                auto pos = ctx.get_main_pos();
+                auto pos_file = boost::filesystem::path(pos.get_file().begin(), pos.get_file().end()).filename().string();
+                std::cout << '[' << pos_file << ':' << pos.get_line() << ':'  << pos.get_column() << "]: ";
+                
+                // Wrap the event printing in try-catch - this is where corrupted tokens can cause crashes
+                try {
+                    std::visit([&latest](auto const& event){ event.print(std::cout, latest->tokens); }, latest->event);
+                } catch (...) {
+                    std::cout << "<error_printing_event>";
+                }
+            } catch (...) {
+                std::cout << "<error_getting_position>" << std::endl;
+            }
         }
 
         template <class ContextT, typename Iterator>
@@ -308,7 +334,13 @@ namespace ppstep {
 
             cl.set_mode(stepping_mode::FREE);
 
-            if (print_state) current_state(ctx);
+            if (print_state) {
+                try {
+                    current_state(ctx);
+                } catch (...) {
+                    std::cout << "<error_displaying_state>" << std::endl;
+                }
+            }
 
             auto prompt = std::string("pp");
             if (!prefix.empty()) {
