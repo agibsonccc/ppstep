@@ -5,10 +5,6 @@
 #include <iostream>
 #include <list>
 #include <vector>
-#include <csignal>
-#include <setjmp.h>
-#include <cstring>
-#include <unistd.h>
 
 #include <boost/wave.hpp>
 #include <boost/wave/cpplexer/cpp_lex_token.hpp>
@@ -36,20 +32,6 @@ using context_type =
         boost::wave::iteration_context_policies::load_file_to_string,
         ppstep::server<token_type, token_sequence_type>
     >;
-
-// Signal handler for segfaults - must be signal-safe
-static sigjmp_buf jump_buffer;
-static volatile sig_atomic_t segfault_occurred = 0;
-
-void segfault_handler(int sig) {
-    segfault_occurred = 1;
-    
-    // Use write() which is signal-safe (not std::cerr)
-    const char msg[] = "\n💥 Segmentation fault - Wave context corrupted\n   Terminating preprocessing.\n";
-    write(STDERR_FILENO, msg, sizeof(msg) - 1);
-    
-    siglongjmp(jump_buffer, 1);
-}
 
 static std::string read_entire_file(std::istream&& instream) {
     instream.unsetf(std::ios::skipws);
@@ -134,55 +116,62 @@ int main(int argc, char const** argv) {
         }
     }
 
-    // Install segfault handler
-    struct sigaction sa;
-    memset(&sa, 0, sizeof(sa));
-    sa.sa_handler = segfault_handler;
-    sigemptyset(&sa.sa_mask);
-    sa.sa_flags = 0;
-    sigaction(SIGSEGV, &sa, nullptr);
-    
-    // Set up error recovery jump point
-    if (sigsetjmp(jump_buffer, 1) != 0) {
-        // Jumped here from segfault handler
-        std::cerr << "\n⚠️  Preprocessing could not continue after fatal error." << std::endl;
-        std::cerr << "Suggestion: Fix preprocessing errors in the source file and try again." << std::endl;
-        return 1;
-    }
-
-    auto first = ctx.begin();
-    auto last = ctx.end();
-    
     try {
         server.start(ctx);
         
-        // Main preprocessing loop
-        while (first != last && segfault_occurred == 0) {
+        auto first = ctx.begin();
+        auto last = ctx.end();
+        
+        while (first != last) {
             try {
-                if (first == last) break;
-                
+                // Try to get the token and process it
                 const auto& token = *first;
                 server.lexed_token(ctx, token);
                 ++first;
                 
             } catch (boost::wave::cpp_exception const& e) {
-                std::string error_desc = e.description();
+                // Wave exception even after our hook tried to suppress it
+                // This means the iterator might be corrupted - just try to skip ahead
+                if (args.count("debug")) {
+                    std::cerr << "[DEBUG] Caught Wave exception in main loop, skipping: " << e.description() << std::endl;
+                }
                 
-                // Check if this is a FATAL lexer error that corrupts the iterator
-                bool is_fatal = (error_desc.find("Unterminated") != std::string::npos ||
-                               error_desc.find("unterminated") != std::string::npos);
-                
-                if (is_fatal) {
-                    // FATAL ERROR - iterator is corrupted, STOP IMMEDIATELY
-                    // Do NOT try to advance the iterator
-                    std::cerr << "\n🛑 FATAL ERROR - Cannot continue preprocessing\n";
-                    std::cerr << "Error: " << error_desc << "\n";
+                // Try to advance past the problem
+                try {
+                    if (first != last) {
+                        ++first;
+                    } else {
+                        break;
+                    }
+                } catch (...) {
+                    // Can't even advance - break out
+                    if (args.count("debug")) {
+                        std::cerr << "[DEBUG] Cannot advance iterator, stopping" << std::endl;
+                    }
                     break;
                 }
                 
-                // Non-fatal error - try to skip and continue
+            } catch (std::exception const& e) {
+                // Some other exception
                 if (args.count("debug")) {
-                    std::cerr << "Wave exception: " << error_desc << std::endl;
+                    std::cerr << "[DEBUG] Caught exception in main loop: " << e.what() << std::endl;
+                }
+                
+                // Try to skip
+                try {
+                    if (first != last) {
+                        ++first;
+                    } else {
+                        break;
+                    }
+                } catch (...) {
+                    break;
+                }
+                
+            } catch (...) {
+                // Unknown exception
+                if (args.count("debug")) {
+                    std::cerr << "[DEBUG] Caught unknown exception, trying to skip" << std::endl;
                 }
                 
                 try {
@@ -192,31 +181,21 @@ int main(int argc, char const** argv) {
                         break;
                     }
                 } catch (...) {
-                    std::cerr << "⚠️  Iterator corrupted after error, cannot continue." << std::endl;
                     break;
                 }
             }
         }
         
-        if (segfault_occurred == 0) {
-            server.complete(ctx);
-        }
+        server.complete(ctx);
         
-    } catch (ppstep::session_terminate const& e) {
+    } catch (ppstep::session_terminate const&) {
+        // User quit - normal exit
         return 0;
-    } catch (boost::wave::cpp_exception const& e) {
-        std::cerr << "Preprocessing error: " << e.description() << std::endl;
-        return 1;
     } catch (std::exception const& e) {
-        std::cerr << "Unexpected error: " << e.what() << std::endl;
+        std::cerr << "\n🔴 Fatal error: " << e.what() << std::endl;
         return 1;
     } catch (...) {
-        std::cerr << "Unknown error occurred" << std::endl;
-        return 1;
-    }
-
-    if (segfault_occurred) {
-        std::cerr << "\n⚠️  Note: Segfault occurred during preprocessing." << std::endl;
+        std::cerr << "\n🔴 Unknown fatal error" << std::endl;
         return 1;
     }
 
