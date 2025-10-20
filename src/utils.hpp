@@ -22,7 +22,33 @@ namespace ppstep {
 
     template <class Token>
     std::ostream& print_token(std::ostream& os, Token const& token) {
-        os << token.get_value().c_str();
+        // Defensive: check if token is valid before accessing its value
+        if (!token.is_valid()) {
+            os << "<invalid_token>";
+            return os;
+        }
+        
+        try {
+            // Try to get the value - may fail if token is corrupted
+            auto value = token.get_value();
+            
+            // Check if we can safely access c_str()
+            // The string object might be corrupt but the pointer might still be readable
+            try {
+                const char* str = value.c_str();
+                if (str != nullptr) {
+                    os << str;
+                } else {
+                    os << "<null_string>";
+                }
+            } catch (...) {
+                os << "<corrupted_string>";
+            }
+        } catch (...) {
+            // If get_value() itself throws or accesses bad memory
+            os << "<error_getting_value>";
+        }
+        
         return os;
     }
     
@@ -41,7 +67,17 @@ namespace ppstep {
     template <class Container>
     std::ostream& print_token_container_preserved(std::ostream& os, Container const& data) {
         for (auto const& token : data) {
-            os << token.get_value();
+            // Defensive: handle corrupted tokens
+            if (!token.is_valid()) {
+                os << "<invalid_token>";
+                continue;
+            }
+            
+            try {
+                os << token.get_value();
+            } catch (...) {
+                os << "<error>";
+            }
         }
         return os;
     }
@@ -53,12 +89,26 @@ namespace ppstep {
         bool need_space = false;
         
         for (auto const& tok : tokens) {
-            auto val = tok.get_value();
+            // Defensive: skip invalid tokens
+            if (!tok.is_valid()) {
+                ss << "<invalid>";
+                need_space = true;
+                continue;
+            }
+            
+            std::string val;
+            try {
+                val = std::string(tok.get_value().c_str());
+            } catch (...) {
+                ss << "<error>";
+                need_space = true;
+                continue;
+            }
             
             // Check if we need to add spacing
             if (need_space && !val.empty()) {
                 // Don't add space before certain punctuation
-                char first_char = val.c_str()[0];
+                char first_char = val[0];
                 if (first_char != ',' && first_char != ';' && first_char != ')' && 
                     first_char != ']' && first_char != '}' && first_char != '.' &&
                     first_char != '-' && first_char != '+' && first_char != '*' && 
@@ -74,7 +124,7 @@ namespace ppstep {
             
             // Set flag for next iteration
             if (!val.empty()) {
-                char last_char = val.c_str()[val.size() - 1];
+                char last_char = val[val.size() - 1];
                 need_space = (last_char != '(' && last_char != '[' && last_char != '{' &&
                              last_char != ' ' && last_char != '\t' && last_char != '\n' &&
                              last_char != '\r');
