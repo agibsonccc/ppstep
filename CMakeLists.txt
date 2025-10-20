@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 3.5)
 project(ppstep)
 
 # Option to enable AddressSanitizer
-option(ENABLE_ASAN "Enable AddressSanitizer for debugging memory issues" OFF)
+option(ENABLE_ASAN "Enable AddressSanitizer for debugging memory issues" ON)
 
 # Force Debug build when ASan is enabled
 if(ENABLE_ASAN)
