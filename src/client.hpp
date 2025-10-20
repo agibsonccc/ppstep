@@ -170,7 +170,14 @@ namespace ppstep {
     
     template <class TokenT, class ContainerT>
     struct client {
-        client(server_state<ContainerT>& state, std::string prefix) : state(&state), cli(client_cli<TokenT, ContainerT>(*this, std::move(prefix))), mode(stepping_mode::FREE), recording_active(false) {}
+        client(server_state<ContainerT>& state, std::string prefix) 
+            : state(&state), 
+              cli(client_cli<TokenT, ContainerT>(*this, std::move(prefix))), 
+              mode(stepping_mode::FREE), 
+              recording_active(false),
+              break_on_error(false),
+              error_occurred(false),
+              last_error_line(0) {}
         
         client(server_state<ContainerT>& state) : client(state, "") {}
 
@@ -213,6 +220,43 @@ namespace ppstep {
         
         std::string get_record_filename() const {
             return record_filename;
+        }
+        
+        // Error handling functionality
+        void on_error(const std::string& error_msg, const std::string& file, int line) {
+            error_occurred = true;
+            last_error_message = error_msg;
+            last_error_file = file;
+            last_error_line = line;
+            
+            // Record error if recording is active
+            if (recording_active) {
+                record_file << "[ERROR] " << file << ":" << line 
+                           << " - " << error_msg << std::endl;
+            }
+            
+            // Print error info
+            std::cerr << "\n" << ansi::bold << "❌ ERROR: " << ansi::reset 
+                      << error_msg << "\n";
+            std::cerr << "  at " << file << ":" << line << "\n";
+            
+            if (break_on_error) {
+                std::cerr << "\n⚠️  Stopped on error (break on error enabled)\n";
+                std::cerr << "Commands: 'continue' to proceed, 'quit' to exit\n" << std::endl;
+            }
+        }
+
+        void set_break_on_error(bool enable) {
+            break_on_error = enable;
+            std::cout << "Break on error: " << (enable ? "enabled" : "disabled") << std::endl;
+        }
+
+        bool should_break_on_error() const {
+            return break_on_error && error_occurred;
+        }
+
+        void clear_error() {
+            error_occurred = false;
         }
         
         // Helper function to output tokens with normalized whitespace
@@ -697,32 +741,42 @@ namespace ppstep {
         void handle_prompt(ContextT& ctx, TokenT const& token, preprocessing_event_type type) {
             bool do_prompt = false;
 
-            switch (mode) {
-                case stepping_mode::FREE: {
-                    do_prompt = true;
-                    break;
-                }
-                case stepping_mode::UNTIL_BREAK: {
-                    switch (type) {
-                        case preprocessing_event_type::CALL: {
-                            if (expansion_breakpoints.find(token.get_value()) != expansion_breakpoints.end()) {
-                                do_prompt = true;
-                            }
-                            break;
-                        }
-                        case preprocessing_event_type::EXPANDED: {
-                            if (expanded_breakpoints.find(token.get_value()) != expanded_breakpoints.end()) {
-                                do_prompt = true;
-                            }
-                            break;
-                        }
+            // Check for errors first
+            if (should_break_on_error()) {
+                do_prompt = true;
+            } else {
+                // Existing logic for breakpoints
+                switch (mode) {
+                    case stepping_mode::FREE: {
+                        do_prompt = true;
+                        break;
                     }
-                    break;
+                    case stepping_mode::UNTIL_BREAK: {
+                        switch (type) {
+                            case preprocessing_event_type::CALL: {
+                                if (expansion_breakpoints.find(token.get_value()) != expansion_breakpoints.end()) {
+                                    do_prompt = true;
+                                }
+                                break;
+                            }
+                            case preprocessing_event_type::EXPANDED: {
+                                if (expanded_breakpoints.find(token.get_value()) != expanded_breakpoints.end()) {
+                                    do_prompt = true;
+                                }
+                                break;
+                            }
+                        }
+                        break;
+                    }
                 }
             }
 
             if (do_prompt) {
-                cli.prompt(ctx, get_preprocessing_event_type_name(type));
+                const char* prompt_state = should_break_on_error() ? "error" : get_preprocessing_event_type_name(type);
+                if (should_break_on_error()) {
+                    clear_error();
+                }
+                cli.prompt(ctx, prompt_state);
             }
         }
 
@@ -741,6 +795,13 @@ namespace ppstep {
         std::ofstream record_file;
         bool recording_active;
         std::string record_filename;
+        
+        // Error handling state
+        bool break_on_error;
+        bool error_occurred;
+        std::string last_error_message;
+        std::string last_error_file;
+        int last_error_line;
     };
 }
 

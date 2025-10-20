@@ -263,19 +263,45 @@ namespace ppstep {
         
         template <typename ContextT, typename ExceptionT>
         void throw_exception(ContextT& ctx, ExceptionT const& e) {
-            // SUPPRESS ALL EXCEPTIONS - just log and continue
-            if (debug) {
-                std::cout << "SUPPRESSED EXCEPTION: " << e.what() << std::endl;
-                try {
-                    std::cout << "Description: " << e.description() << std::endl;
-                } catch (...) {
-                    // Even description() might throw, ignore it
-                }
+            // Get error details
+            std::string error_msg = e.what();
+            std::string error_desc;
+            
+            try {
+                error_desc = e.description();
+            } catch (...) {
+                error_desc = "No description available";
             }
             
-            // DO NOT THROW ANY EXCEPTIONS - just return and continue processing
-            // DO NOT call sink->on_exception
-            // DO NOT call boost::throw_exception
+            // Get file position if available
+            std::string file = "<unknown>";
+            int line = 0;
+            
+            try {
+                auto pos = e.get_error_position();
+                if (!pos.get_file().empty()) {
+                    file = std::string(pos.get_file().c_str());
+                    line = pos.get_line();
+                }
+            } catch (...) {
+                // Position not available
+            }
+            
+            // Notify client about the error
+            if (!debug && sink) {
+                sink->on_error(error_desc, file, line);
+                
+                // If break_on_error is enabled, the prompt will be triggered
+                // through the normal handle_prompt mechanism in the next preprocessing step
+            }
+            
+            if (debug) {
+                std::cout << "SUPPRESSED EXCEPTION: " << error_msg << std::endl;
+                std::cout << "Description: " << error_desc << std::endl;
+                std::cout << "Location: " << file << ":" << line << std::endl;
+            }
+            
+            // DO NOT THROW - just continue processing
             return;
         }
 
