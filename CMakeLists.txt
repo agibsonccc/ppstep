@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 3.5)
 project(ppstep)
 
 # Option to enable AddressSanitizer
-option(ENABLE_ASAN "Enable AddressSanitizer for debugging memory issues" ON)
+option(ENABLE_ASAN "Enable AddressSanitizer for debugging memory issues" OFF)
 
 # Force Debug build when ASan is enabled
 if(ENABLE_ASAN)
@@ -97,9 +97,10 @@ if(ENABLE_ASAN)
     message(STATUS "═══════════════════════════════════════════════════════")
     message(STATUS "🔍 AddressSanitizer Configuration")
     message(STATUS "═══════════════════════════════════════════════════════")
+    message(STATUS "Compiler: ${CMAKE_CXX_COMPILER_ID}")
     
-    # Full debug symbols and minimal optimization
-    target_compile_options(ppstep PUBLIC 
+    # Common flags for all compilers
+    set(ASAN_COMPILE_FLAGS
         # AddressSanitizer flags
         -fsanitize=address
         -fsanitize=undefined          # Also catch undefined behavior
@@ -107,7 +108,6 @@ if(ENABLE_ASAN)
         
         # Debug information flags
         -g3                            # Maximum debug info (includes macro definitions)
-        -ggdb                          # GDB-specific debug info
         -fno-inline                    # Don't inline functions (easier debugging)
         
         # Optimization
@@ -115,8 +115,21 @@ if(ENABLE_ASAN)
         
         # Additional useful flags
         -fno-optimize-sibling-calls   # Better stack traces
-        -fstandalone-debug            # Include all debug info even for templates
     )
+    
+    # Add compiler-specific flags
+    if(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+        # Clang-specific flags
+        list(APPEND ASAN_COMPILE_FLAGS -fstandalone-debug)
+        message(STATUS "  ✓ Clang-specific: -fstandalone-debug")
+    elseif(CMAKE_CXX_COMPILER_ID MATCHES "GNU")
+        # GCC-specific flags
+        list(APPEND ASAN_COMPILE_FLAGS -ggdb)
+        message(STATUS "  ✓ GCC-specific: -ggdb")
+    endif()
+    
+    # Apply compile flags
+    target_compile_options(ppstep PUBLIC ${ASAN_COMPILE_FLAGS})
     
     # Linker flags for ASan
     target_link_options(ppstep PUBLIC 
@@ -124,6 +137,7 @@ if(ENABLE_ASAN)
         -fsanitize=undefined
     )
     
+    message(STATUS "")
     message(STATUS "Build Type: ${CMAKE_BUILD_TYPE}")
     message(STATUS "")
     message(STATUS "Sanitizers:")
@@ -132,11 +146,9 @@ if(ENABLE_ASAN)
     message(STATUS "")
     message(STATUS "Debug Flags:")
     message(STATUS "  ✓ -g3 (maximum debug symbols)")
-    message(STATUS "  ✓ -ggdb (GDB debug info)")
     message(STATUS "  ✓ -O0 (no optimization)")
     message(STATUS "  ✓ -fno-inline (preserve function calls)")
     message(STATUS "  ✓ -fno-omit-frame-pointer (stack traces)")
-    message(STATUS "  ✓ -fstandalone-debug (template debug info)")
     message(STATUS "")
     message(STATUS "This build will be SLOW but provide maximum debugging info")
     message(STATUS "═══════════════════════════════════════════════════════")
