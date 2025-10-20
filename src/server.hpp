@@ -262,31 +262,55 @@ namespace ppstep {
             }
         }
         
-        // Boost 1.89+ changed exception API - handle both old and new
+        // Properly extract error information from Boost.Wave exceptions
         template <typename ContextT, typename ExceptionT>
-        void throw_exception(ContextT& ctx, ExceptionT const& e) {
-            // Get error details
-            std::string error_msg = e.what();
-            std::string error_desc = "Preprocessing error";
-            
-            // Get file position - Boost 1.89+ doesn't have get_error_position()
-            std::string file = "<unknown>";
+        bool throw_exception(ContextT& ctx, ExceptionT const& e) {
+            // Extract error details from the exception
+            std::string error_msg;
+            std::string file;
             int line = 0;
             
-            // Boost 1.89+ stores position differently
-            // Try to extract from what() message or use default
+            // Try to get description if available
+            try {
+                error_msg = e.description();
+            } catch (...) {
+                error_msg = e.what();
+            }
+            
+            // Try to extract file and line information
+            // Different Boost versions have different APIs
+            try {
+                // Try newer API first (file_name() and line_no())
+                file = e.file_name();
+                line = e.line_no();
+            } catch (...) {
+                try {
+                    // Try older API (get_error_position())
+                    auto pos = e.get_error_position();
+                    file = pos.get_file().c_str();
+                    line = pos.get_line();
+                } catch (...) {
+                    // Fallback: use current context position
+                    try {
+                        auto pos = ctx.get_main_pos();
+                        file = std::string(pos.get_file().begin(), pos.get_file().end());
+                        line = pos.get_line();
+                    } catch (...) {
+                        file = "<unknown>";
+                        line = 0;
+                    }
+                }
+            }
             
             // Notify client about the error
             if (!debug && sink) {
-                sink->on_error(error_desc, file, line);
+                sink->on_error(error_msg, file, line);
+            } else if (debug) {
+                std::cerr << "ERROR: " << error_msg << " at " << file << ":" << line << std::endl;
             }
             
-            if (debug) {
-                std::cout << "SUPPRESSED EXCEPTION: " << error_msg << std::endl;
-            }
-            
-            // DO NOT THROW - just continue processing
-            return;
+            // Return false to suppress the exception and continue processing
+            return false;
         }
 
         template <typename ContextT>
