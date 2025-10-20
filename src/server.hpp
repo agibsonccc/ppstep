@@ -297,7 +297,7 @@ namespace ppstep {
             }
         }
         
-        // Log the error, disable printing, and suppress the exception
+        // Log the error and decide whether to suppress or throw based on severity
         template <typename ContextT, typename ExceptionT>
         bool throw_exception(ContextT& ctx, ExceptionT const& e) {
             // Extract error information
@@ -305,6 +305,7 @@ namespace ppstep {
             std::string file;
             int line = 0;
             int column = 0;
+            int severity = boost::wave::util::severity_fatal; // default to fatal
             
             try {
                 error_msg = e.description();
@@ -345,17 +346,38 @@ namespace ppstep {
                 column = 0;
             }
             
-            // Log the error/warning
-            std::cerr << "⚠️  " << file << ":" << line;
+            // Get severity level
+            try {
+                severity = e.get_severity();
+            } catch (...) {
+                // If we can't get severity, default to fatal (throw exception)
+                severity = boost::wave::util::severity_fatal;
+            }
+            
+            // Log the error/warning based on severity
+            const char* severity_symbol = "⚠️ ";
+            if (severity == boost::wave::util::severity_remark) {
+                severity_symbol = "ℹ️ ";
+            } else if (severity == boost::wave::util::severity_warning) {
+                severity_symbol = "⚠️ ";
+            } else {
+                severity_symbol = "❌";
+            }
+            
+            std::cerr << severity_symbol << " " << file << ":" << line;
             if (column > 0) std::cerr << ":" << column;
             std::cerr << " - " << error_msg << std::endl;
             
-            // CRITICAL: After ANY Wave error/warning, disable printing
-            // The token stream may be corrupted and accessing it causes segfaults
-            state->disable_printing = true;
-            
-            // Return FALSE = suppress ALL exceptions, continue processing
-            return false;
+            // Decision: suppress warnings and remarks, throw everything else
+            if (severity == boost::wave::util::severity_remark ||
+                severity == boost::wave::util::severity_warning) {
+                // Return FALSE = suppress the exception, continue processing
+                return false;
+            } else {
+                // Return TRUE = throw the exception (will be caught in main loop)
+                state->disable_printing = true;
+                return true;
+            }
         }
 
         template <typename ContextT>
