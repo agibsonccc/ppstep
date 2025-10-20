@@ -123,67 +123,9 @@ int main(int argc, char const** argv) {
         auto last = ctx.end();
         
         while (first != last) {
-            try {
-                // Try to get the token and process it
-                const auto& token = *first;
-                server.lexed_token(ctx, token);
-                ++first;
-                
-            } catch (boost::wave::cpp_exception const& e) {
-                // Wave exception even after our hook tried to suppress it
-                // This means the iterator might be corrupted - just try to skip ahead
-                if (args.count("debug")) {
-                    std::cerr << "[DEBUG] Caught Wave exception in main loop, skipping: " << e.description() << std::endl;
-                }
-                
-                // Try to advance past the problem
-                try {
-                    if (first != last) {
-                        ++first;
-                    } else {
-                        break;
-                    }
-                } catch (...) {
-                    // Can't even advance - break out
-                    if (args.count("debug")) {
-                        std::cerr << "[DEBUG] Cannot advance iterator, stopping" << std::endl;
-                    }
-                    break;
-                }
-                
-            } catch (std::exception const& e) {
-                // Some other exception
-                if (args.count("debug")) {
-                    std::cerr << "[DEBUG] Caught exception in main loop: " << e.what() << std::endl;
-                }
-                
-                // Try to skip
-                try {
-                    if (first != last) {
-                        ++first;
-                    } else {
-                        break;
-                    }
-                } catch (...) {
-                    break;
-                }
-                
-            } catch (...) {
-                // Unknown exception
-                if (args.count("debug")) {
-                    std::cerr << "[DEBUG] Caught unknown exception, trying to skip" << std::endl;
-                }
-                
-                try {
-                    if (first != last) {
-                        ++first;
-                    } else {
-                        break;
-                    }
-                } catch (...) {
-                    break;
-                }
-            }
+            const auto& token = *first;
+            server.lexed_token(ctx, token);
+            ++first;
         }
         
         server.complete(ctx);
@@ -191,11 +133,19 @@ int main(int argc, char const** argv) {
     } catch (ppstep::session_terminate const&) {
         // User quit - normal exit
         return 0;
+        
+    } catch (boost::wave::cpp_exception const& e) {
+        // Wave exception - already logged by our hook
+        // Stop gracefully to avoid segfault
+        std::cerr << "\n⚠️  Stopping preprocessing due to error (processed what we could)" << std::endl;
+        return 0;
+        
     } catch (std::exception const& e) {
-        std::cerr << "\n🔴 Fatal error: " << e.what() << std::endl;
+        std::cerr << "\n🔴 Unexpected error: " << e.what() << std::endl;
         return 1;
+        
     } catch (...) {
-        std::cerr << "\n🔴 Unknown fatal error" << std::endl;
+        std::cerr << "\n🔴 Unknown error" << std::endl;
         return 1;
     }
 

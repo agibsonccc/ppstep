@@ -292,18 +292,17 @@ namespace ppstep {
             }
         }
         
-        // Extract error information and log it, but NEVER exit - just suppress the exception
-        // Let the main loop's segfault handler catch actual crashes
+        // Log the error and LET THE EXCEPTION BE THROWN
+        // We'll catch it cleanly in the main loop and stop gracefully
+        // This prevents segfaults from trying to use corrupted Wave state
         template <typename ContextT, typename ExceptionT>
         bool throw_exception(ContextT& ctx, ExceptionT const& e) {
-            // Extract all available error information
+            // Extract error information
             std::string error_msg;
             std::string file;
             int line = 0;
             int column = 0;
-            unsigned int error_code = 0;
             
-            // Get error description
             try {
                 error_msg = e.description();
             } catch (...) {
@@ -314,14 +313,6 @@ namespace ppstep {
                 }
             }
             
-            // Get error code to determine severity
-            try {
-                error_code = static_cast<unsigned int>(e.get_errorcode());
-            } catch (...) {
-                error_code = 0;
-            }
-            
-            // Get file location
             try {
                 file = e.file_name();
             } catch (...) {
@@ -333,7 +324,6 @@ namespace ppstep {
                 }
             }
             
-            // Get line number
             try {
                 line = e.line_no();
             } catch (...) {
@@ -345,7 +335,6 @@ namespace ppstep {
                 }
             }
             
-            // Get column number if available
             try {
                 auto pos = ctx.get_main_pos();
                 column = pos.get_column();
@@ -353,50 +342,15 @@ namespace ppstep {
                 column = 0;
             }
             
-            // Classify error severity for logging purposes only
-            bool is_warning = (error_msg.find("warning:") != std::string::npos ||
-                              error_msg.find("Warning:") != std::string::npos ||
-                              error_code < 100);
+            // Just log it - don't try to classify or make decisions
+            std::cerr << "⚠️  " << file << ":" << line;
+            if (column > 0) std::cerr << ":" << column;
+            std::cerr << " - " << error_msg << std::endl;
             
-            // Log the error with appropriate formatting
-            if (is_warning) {
-                // Compact warning format
-                std::cerr << "⚠️  Warning at " << file << ":" << line;
-                if (column > 0) std::cerr << ":" << column;
-                std::cerr << "\n    " << error_msg << std::endl;
-            } else {
-                // More detailed error format
-                std::cerr << "\n";
-                std::cerr << "═══════════════════════════════════════════════════════════════\n";
-                std::cerr << "🔴 PREPROCESSING ERROR (continuing...)\n";
-                std::cerr << "═══════════════════════════════════════════════════════════════\n";
-                std::cerr << "\nWHY:  " << error_msg << "\n";
-                std::cerr << "\nWHERE:\n";
-                std::cerr << "  File:   " << file << "\n";
-                std::cerr << "  Line:   " << line << "\n";
-                if (column > 0) {
-                    std::cerr << "  Column: " << column << "\n";
-                }
-                
-                // Include macro expansion context if available
-                if (state && !state->expanding.empty()) {
-                    std::cerr << "\nCONTEXT:\n";
-                    std::cerr << "  While expanding: ";
-                    print_token_container(std::cerr, state->expanding.back());
-                    std::cerr << "\n";
-                }
-                
-                if (error_code > 0) {
-                    std::cerr << "\nError Code: " << error_code << "\n";
-                }
-                
-                std::cerr << "═══════════════════════════════════════════════════════════════\n\n";
-            }
-            
-            // ALWAYS suppress the exception and continue
-            // If the error truly corrupts the context, the segfault handler will catch it
-            // Return false = suppress the exception, allow preprocessing to continue
-            return false;
+            // Return TRUE = throw the exception
+            // The main loop will catch it and stop gracefully
+            // This prevents segfaults from corrupted Wave state
+            return true;
         }
 
         template <typename ContextT>
