@@ -262,43 +262,42 @@ namespace ppstep {
             }
         }
         
-        // Properly extract error information from Boost.Wave exceptions
+        // Extract error information from Boost.Wave 1.89+ exceptions
         template <typename ContextT, typename ExceptionT>
         bool throw_exception(ContextT& ctx, ExceptionT const& e) {
-            // Extract error details from the exception
             std::string error_msg;
             std::string file;
             int line = 0;
             
-            // Try to get description if available
+            // Get description
             try {
                 error_msg = e.description();
             } catch (...) {
                 error_msg = e.what();
             }
             
-            // Try to extract file and line information
-            // Different Boost versions have different APIs
+            // Boost 1.89+ has file_name() and line_no() directly on exceptions
             try {
-                // Try newer API first (file_name() and line_no())
                 file = e.file_name();
+            } catch (...) {
+                // Fallback to context position
+                try {
+                    auto pos = ctx.get_main_pos();
+                    file = std::string(pos.get_file().begin(), pos.get_file().end());
+                } catch (...) {
+                    file = "<unknown>";
+                }
+            }
+            
+            try {
                 line = e.line_no();
             } catch (...) {
+                // Fallback to context position
                 try {
-                    // Try older API (get_error_position())
-                    auto pos = e.get_error_position();
-                    file = pos.get_file().c_str();
+                    auto pos = ctx.get_main_pos();
                     line = pos.get_line();
                 } catch (...) {
-                    // Fallback: use current context position
-                    try {
-                        auto pos = ctx.get_main_pos();
-                        file = std::string(pos.get_file().begin(), pos.get_file().end());
-                        line = pos.get_line();
-                    } catch (...) {
-                        file = "<unknown>";
-                        line = 0;
-                    }
+                    line = 0;
                 }
             }
             
