@@ -418,83 +418,17 @@ namespace ppstep {
             std::cerr << "Full error context written to: " << log_filename.str() << std::endl;
         }
         
-        // Handle errors/warnings based on severity
+        // Always throw all exceptions to ppstep.cpp - let it decide what to do
         template <typename ContextT, typename ExceptionT>
         bool throw_exception(ContextT& ctx, ExceptionT const& e) {
-            // Extract error information
-            std::string error_msg;
-            std::string file;
-            int line = 0;
-            int column = 0;
-            int severity = boost::wave::util::severity_fatal; // default to fatal
-            
-            try {
-                error_msg = e.description();
-            } catch (...) {
-                try {
-                    error_msg = e.what();
-                } catch (...) {
-                    error_msg = "<unknown error>";
-                }
-            }
-            
-            try {
-                file = e.file_name();
-            } catch (...) {
-                try {
-                    auto pos = ctx.get_main_pos();
-                    file = std::string(pos.get_file().begin(), pos.get_file().end());
-                } catch (...) {
-                    file = "<unknown>";
-                }
-            }
-            
-            try {
-                line = e.line_no();
-            } catch (...) {
-                try {
-                    auto pos = ctx.get_main_pos();
-                    line = pos.get_line();
-                } catch (...) {
-                    line = 0;
-                }
-            }
-            
-            try {
-                auto pos = ctx.get_main_pos();
-                column = pos.get_column();
-            } catch (...) {
-                column = 0;
-            }
-            
-            // Get severity level
-            try {
-                severity = e.get_severity();
-            } catch (...) {
-                // If we can't get severity, default to fatal
-                severity = boost::wave::util::severity_fatal;
-            }
-            
-            // Determine action based on severity
-            if (severity == boost::wave::util::severity_remark || 
-                severity == boost::wave::util::severity_warning) {
-                // WARNINGS/REMARKS: Silently suppress and continue
-                // Return FALSE = suppress exception, continue processing
-                return false;
-            } else {
-                // ERRORS/FATAL: Dump full context to log file, then throw to caller
-                state->disable_printing = true;
-                fatal_error_occurred = true;
-                
-                // Dump full error context to log file
-                dump_error_to_log(ctx, e);
-                
-                // Print brief error to stderr
-                std::cerr << "❌ " << file << ":" << line;
-                if (column > 0) std::cerr << ":" << column;
-                std::cerr << " - " << error_msg << std::endl;
-                
-                // Return TRUE = throw exception back to ppstep.cpp main loop
+            // Set flags to prevent crashes from corrupted state
+            state->disable_printing = true;
+            fatal_error_occurred = true;
+
+            // Return TRUE = always throw exception to ppstep.cpp
+            // ppstep.cpp will decide whether to log based on severity
+            return true;
+        } back to ppstep.cpp main loop
                 return true;
             }
         }
