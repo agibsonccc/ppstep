@@ -21,6 +21,10 @@ namespace ppstep {
         std::string message;
         preprocessing_fatal_error(const std::string& msg) : message(msg) {}
     };
+    
+    // Forward declaration of client template
+    template <class TokenT, class ContainerT>
+    struct client;
 }
 
 #endif // PPSTEP_CLIENT_FWD_HPP
