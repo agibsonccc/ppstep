@@ -2,7 +2,13 @@ cmake_minimum_required(VERSION 3.5)
 project(ppstep)
 
 # Option to enable AddressSanitizer
-option(ENABLE_ASAN "Enable AddressSanitizer for debugging memory issues" ON)
+option(ENABLE_ASAN "Enable AddressSanitizer for debugging memory issues" OFF)
+
+# Force Debug build when ASan is enabled
+if(ENABLE_ASAN)
+    set(CMAKE_BUILD_TYPE Debug CACHE STRING "Build type" FORCE)
+    message(STATUS "🔍 AddressSanitizer ENABLED - forcing Debug build")
+endif()
 
 # Use passed-in Boost paths if provided
 if(DEFINED BOOST_ROOT)
@@ -87,23 +93,54 @@ target_compile_options(ppstep PUBLIC -std=c++17)
 
 # AddressSanitizer configuration
 if(ENABLE_ASAN)
-    message(STATUS "🔍 AddressSanitizer ENABLED")
+    message(STATUS "")
+    message(STATUS "═══════════════════════════════════════════════════════")
+    message(STATUS "🔍 AddressSanitizer Configuration")
+    message(STATUS "═══════════════════════════════════════════════════════")
     
-    # Compiler flags for ASan
+    # Full debug symbols and minimal optimization
     target_compile_options(ppstep PUBLIC 
-        -fsanitize=address 
-        -fno-omit-frame-pointer
-        -g
-        -O1
+        # AddressSanitizer flags
+        -fsanitize=address
+        -fsanitize=undefined          # Also catch undefined behavior
+        -fno-omit-frame-pointer       # Keep frame pointers for better stack traces
+        
+        # Debug information flags
+        -g3                            # Maximum debug info (includes macro definitions)
+        -ggdb                          # GDB-specific debug info
+        -fno-inline                    # Don't inline functions (easier debugging)
+        
+        # Optimization
+        -O0                            # No optimization for clearest debugging
+        
+        # Additional useful flags
+        -fno-optimize-sibling-calls   # Better stack traces
+        -fstandalone-debug            # Include all debug info even for templates
     )
     
     # Linker flags for ASan
     target_link_options(ppstep PUBLIC 
         -fsanitize=address
+        -fsanitize=undefined
     )
     
-    message(STATUS "   Compile flags: -fsanitize=address -fno-omit-frame-pointer -g -O1")
-    message(STATUS "   Link flags: -fsanitize=address")
+    message(STATUS "Build Type: ${CMAKE_BUILD_TYPE}")
+    message(STATUS "")
+    message(STATUS "Sanitizers:")
+    message(STATUS "  ✓ AddressSanitizer (memory errors)")
+    message(STATUS "  ✓ UndefinedBehaviorSanitizer")
+    message(STATUS "")
+    message(STATUS "Debug Flags:")
+    message(STATUS "  ✓ -g3 (maximum debug symbols)")
+    message(STATUS "  ✓ -ggdb (GDB debug info)")
+    message(STATUS "  ✓ -O0 (no optimization)")
+    message(STATUS "  ✓ -fno-inline (preserve function calls)")
+    message(STATUS "  ✓ -fno-omit-frame-pointer (stack traces)")
+    message(STATUS "  ✓ -fstandalone-debug (template debug info)")
+    message(STATUS "")
+    message(STATUS "This build will be SLOW but provide maximum debugging info")
+    message(STATUS "═══════════════════════════════════════════════════════")
+    message(STATUS "")
 else()
     message(STATUS "AddressSanitizer disabled (use -DENABLE_ASAN=ON to enable)")
 endif()
