@@ -305,9 +305,9 @@ namespace ppstep {
             }
         }
         
-        // Dump full error context to log file and exit
+        // Dump full error context to log file
         template <typename ContextT, typename ExceptionT>
-        void dump_error_and_exit(ContextT& ctx, ExceptionT const& e) {
+        void dump_error_to_log(ContextT& ctx, ExceptionT const& e) {
             // Get timestamp for log filename
             auto now = std::chrono::system_clock::now();
             auto time_t = std::chrono::system_clock::to_time_t(now);
@@ -317,7 +317,7 @@ namespace ppstep {
             std::ofstream log(log_filename.str());
             if (!log.is_open()) {
                 std::cerr << "ERROR: Could not create log file: " << log_filename.str() << std::endl;
-                std::exit(1);
+                return;
             }
             
             // Write header
@@ -414,29 +414,95 @@ namespace ppstep {
             
             log.close();
             
-            // Print to stderr
-            std::cerr << "\n" << std::string(60, '=') << std::endl;
-            std::cerr << "❌ PREPROCESSING ERROR" << std::endl;
-            std::cerr << std::string(60, '=') << std::endl;
-            std::cerr << "Location: " << file << ":" << line;
-            if (column > 0) std::cerr << ":" << column;
-            std::cerr << std::endl;
-            std::cerr << "Message:  " << error_msg << std::endl;
-            std::cerr << "\nFull error context written to: " << log_filename.str() << std::endl;
-            std::cerr << std::string(60, '=') << std::endl;
-            
-            // Exit cleanly
-            std::exit(1);
+            // Print log file location to stderr
+            std::cerr << "Full error context written to: " << log_filename.str() << std::endl;
         }
         
-        // Log the error, dump full context, and exit
+        // Handle errors/warnings based on severity
         template <typename ContextT, typename ExceptionT>
         bool throw_exception(ContextT& ctx, ExceptionT const& e) {
-            // Dump everything and exit - no recovery
-            dump_error_and_exit(ctx, e);
+            // Extract error information
+            std::string error_msg;
+            std::string file;
+            int line = 0;
+            int column = 0;
+            int severity = boost::wave::util::severity_fatal; // default to fatal
             
-            // Never reached, but kept for interface compatibility
-            return true;
+            try {
+                error_msg = e.description();
+            } catch (...) {
+                try {
+                    error_msg = e.what();
+                } catch (...) {
+                    error_msg = "<unknown error>";
+                }
+            }
+            
+            try {
+                file = e.file_name();
+            } catch (...) {
+                try {
+                    auto pos = ctx.get_main_pos();
+                    file = std::string(pos.get_file().begin(), pos.get_file().end());
+                } catch (...) {
+                    file = "<unknown>";
+                }
+            }
+            
+            try {
+                line = e.line_no();
+            } catch (...) {
+                try {
+                    auto pos = ctx.get_main_pos();
+                    line = pos.get_line();
+                } catch (...) {
+                    line = 0;
+                }
+            }
+            
+            try {
+                auto pos = ctx.get_main_pos();
+                column = pos.get_column();
+            } catch (...) {
+                column = 0;
+            }
+            
+            // Get severity level
+            try {
+                severity = e.get_severity();
+            } catch (...) {
+                // If we can't get severity, default to fatal
+                severity = boost::wave::util::severity_fatal;
+            }
+            
+            // Determine action based on severity
+            if (severity == boost::wave::util::severity_remark || 
+                severity == boost::wave::util::severity_warning) {
+                // WARNINGS/REMARKS: Log and continue
+                const char* severity_symbol = (severity == boost::wave::util::severity_remark) ? "ℹ️ " : "⚠️ ";
+                
+                std::cerr << severity_symbol << " " << file << ":" << line;
+                if (column > 0) std::cerr << ":" << column;
+                std::cerr << " - " << error_msg << std::endl;
+                
+                // Return FALSE = suppress exception, continue processing
+                return false;
+            } else {
+                // ERRORS/FATAL: Dump full context to log file, then throw to caller
+                state->disable_printing = true;
+                fatal_error_occurred = true;
+                
+                // Dump full error context to log file
+                dump_error_to_log(ctx, e);
+                
+                // Print brief error to stderr
+                std::cerr << "❌ " << file << ":" << line;
+                if (column > 0) std::cerr << ":" << column;
+                std::cerr << " - " << error_msg << std::endl;
+                
+                // Return TRUE = throw exception back to ppstep.cpp main loop
+                return true;
+            }
         }
 
         template <typename ContextT>
