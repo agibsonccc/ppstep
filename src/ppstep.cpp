@@ -153,67 +153,36 @@ int main(int argc, char const** argv) {
     auto first = ctx.begin();
     auto last = ctx.end();
     
-    int consecutive_errors = 0;
-    const int MAX_CONSECUTIVE_ERRORS = 5;
-    
     try {
         server.start(ctx);
         
-        // Main preprocessing loop with enhanced error recovery
+        // Main preprocessing loop
         while (first != last && segfault_occurred == 0) {
             try {
-                // Validate iterator before dereferencing
                 if (first == last) break;
                 
-                // Try to get the token - THIS can segfault if context corrupted
                 const auto& token = *first;
-                
-                // Process it
                 server.lexed_token(ctx, token);
-                
-                // Try to advance - THIS can also segfault
                 ++first;
                 
-                // Reset error counter on success
-                consecutive_errors = 0;
-                
             } catch (boost::wave::cpp_exception const& e) {
-                consecutive_errors++;
+                std::string error_desc = e.description();
                 
-                if (consecutive_errors >= MAX_CONSECUTIVE_ERRORS) {
-                    std::cerr << "\n⚠️  Too many consecutive errors (" << consecutive_errors 
-                              << "), stopping to prevent infinite loop." << std::endl;
+                // Check if this is a FATAL lexer error that corrupts the iterator
+                bool is_fatal = (error_desc.find("Unterminated") != std::string::npos ||
+                               error_desc.find("unterminated") != std::string::npos);
+                
+                if (is_fatal) {
+                    // FATAL ERROR - iterator is corrupted, STOP IMMEDIATELY
+                    // Do NOT try to advance the iterator
+                    std::cerr << "\n🛑 FATAL ERROR - Cannot continue preprocessing\n";
+                    std::cerr << "Error: " << error_desc << "\n";
                     break;
                 }
                 
+                // Non-fatal error - try to skip and continue
                 if (args.count("debug")) {
-                    std::cerr << "Wave exception #" << consecutive_errors 
-                              << " during iteration: " << e.description() << std::endl;
-                }
-                
-                // Try to advance past the error
-                try {
-                    if (first != last) {
-                        ++first;
-                    } else {
-                        break;
-                    }
-                } catch (...) {
-                    // Cannot advance - iterator is completely broken
-                    std::cerr << "⚠️  Iterator corrupted, cannot continue." << std::endl;
-                    break;
-                }
-                
-            } catch (std::exception const& e) {
-                consecutive_errors++;
-                
-                if (consecutive_errors >= MAX_CONSECUTIVE_ERRORS) {
-                    std::cerr << "\n⚠️  Too many consecutive errors, stopping." << std::endl;
-                    break;
-                }
-                
-                if (args.count("debug")) {
-                    std::cerr << "Exception during iteration: " << e.what() << std::endl;
+                    std::cerr << "Wave exception: " << error_desc << std::endl;
                 }
                 
                 try {
@@ -223,28 +192,7 @@ int main(int argc, char const** argv) {
                         break;
                     }
                 } catch (...) {
-                    break;
-                }
-                
-            } catch (...) {
-                consecutive_errors++;
-                
-                if (consecutive_errors >= MAX_CONSECUTIVE_ERRORS) {
-                    std::cerr << "\n⚠️  Too many consecutive errors, stopping." << std::endl;
-                    break;
-                }
-                
-                if (args.count("debug")) {
-                    std::cerr << "Unknown exception during iteration" << std::endl;
-                }
-                
-                try {
-                    if (first != last) {
-                        ++first;
-                    } else {
-                        break;
-                    }
-                } catch (...) {
+                    std::cerr << "⚠️  Iterator corrupted after error, cannot continue." << std::endl;
                     break;
                 }
             }
@@ -255,7 +203,6 @@ int main(int argc, char const** argv) {
         }
         
     } catch (ppstep::session_terminate const& e) {
-        // Session terminated normally by user
         return 0;
     } catch (boost::wave::cpp_exception const& e) {
         std::cerr << "Preprocessing error: " << e.description() << std::endl;
