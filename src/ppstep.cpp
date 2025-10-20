@@ -5,6 +5,8 @@
 #include <iostream>
 #include <list>
 #include <vector>
+#include <csignal>
+#include <setjmp.h>
 
 #include <boost/wave.hpp>
 #include <boost/wave/cpplexer/cpp_lex_token.hpp>
@@ -33,6 +35,16 @@ using context_type =
         ppstep::server<token_type, token_sequence_type>
     >;
 
+// Signal handler for segfaults
+static jmp_buf jump_buffer;
+static bool segfault_occurred = false;
+
+void segfault_handler(int sig) {
+    segfault_occurred = true;
+    std::cerr << "\n💥 Segmentation fault detected - Wave context corrupted after error" << std::endl;
+    std::cerr << "   Cannot continue preprocessing safely." << std::endl;
+    longjmp(jump_buffer, 1);
+}
 
 static std::string read_entire_file(std::istream&& instream) {
     instream.unsetf(std::ios::skipws);
@@ -117,69 +129,137 @@ int main(int argc, char const** argv) {
         }
     }
 
+    // Install segfault handler
+    std::signal(SIGSEGV, segfault_handler);
+    
+    // Set up error recovery jump point
+    if (setjmp(jump_buffer) != 0) {
+        // Jumped here from segfault handler
+        std::cerr << "\nPreprocessing terminated due to fatal error." << std::endl;
+        return 1;
+    }
+
     auto first = ctx.begin();
     auto last = ctx.end();
+    
+    bool error_recovery_mode = false;
+    int consecutive_errors = 0;
+    const int MAX_CONSECUTIVE_ERRORS = 5;
     
     try {
         server.start(ctx);
         
-        // Main preprocessing loop - exceptions are handled by throw_exception hook
-        while (first != last) {
+        // Main preprocessing loop with enhanced error recovery
+        while (first != last && !segfault_occurred) {
             try {
-                server.lexed_token(ctx, *first);
+                // Validate iterator before dereferencing
+                if (first == last) break;
+                
+                // Try to get the token
+                const auto& token = *first;
+                
+                // Process it
+                server.lexed_token(ctx, token);
+                
+                // Try to advance
                 ++first;
+                
+                // Reset error counter on success
+                consecutive_errors = 0;
+                error_recovery_mode = false;
+                
             } catch (boost::wave::cpp_exception const& e) {
-                // Wave exception during token iteration
-                // Error already handled by throw_exception hook, just continue if possible
-                if (args.count("debug")) {
-                    std::cerr << "Caught Wave exception during iteration, attempting to continue..." << std::endl;
+                consecutive_errors++;
+                
+                if (consecutive_errors >= MAX_CONSECUTIVE_ERRORS) {
+                    std::cerr << "\n⚠️  Too many consecutive errors (" << consecutive_errors 
+                              << "), stopping to prevent infinite loop." << std::endl;
+                    break;
                 }
+                
+                if (args.count("debug")) {
+                    std::cerr << "Wave exception #" << consecutive_errors 
+                              << " during iteration: " << e.description() << std::endl;
+                }
+                
+                error_recovery_mode = true;
+                
+                // Try to advance past the error
                 try {
-                    ++first;  // Try to skip past the problematic token
-                } catch (...) {
-                    // Can't even advance iterator, must stop
-                    if (args.count("debug")) {
-                        std::cerr << "Cannot advance iterator, stopping." << std::endl;
+                    if (first != last) {
+                        ++first;
+                    } else {
+                        break;
                     }
+                } catch (...) {
+                    // Cannot advance - iterator is completely broken
+                    std::cerr << "⚠️  Iterator corrupted, cannot continue." << std::endl;
                     break;
                 }
+                
             } catch (std::exception const& e) {
-                // Other exception
-                if (args.count("debug")) {
-                    std::cerr << "Caught exception during iteration: " << e.what() << ", attempting to continue..." << std::endl;
+                consecutive_errors++;
+                
+                if (consecutive_errors >= MAX_CONSECUTIVE_ERRORS) {
+                    std::cerr << "\n⚠️  Too many consecutive errors, stopping." << std::endl;
+                    break;
                 }
+                
+                if (args.count("debug")) {
+                    std::cerr << "Exception during iteration: " << e.what() << std::endl;
+                }
+                
                 try {
-                    ++first;
+                    if (first != last) {
+                        ++first;
+                    } else {
+                        break;
+                    }
                 } catch (...) {
                     break;
                 }
+                
             } catch (...) {
-                // Unknown exception
-                if (args.count("debug")) {
-                    std::cerr << "Caught unknown exception during iteration, attempting to continue..." << std::endl;
+                consecutive_errors++;
+                
+                if (consecutive_errors >= MAX_CONSECUTIVE_ERRORS) {
+                    std::cerr << "\n⚠️  Too many consecutive errors, stopping." << std::endl;
+                    break;
                 }
+                
+                if (args.count("debug")) {
+                    std::cerr << "Unknown exception during iteration" << std::endl;
+                }
+                
                 try {
-                    ++first;
+                    if (first != last) {
+                        ++first;
+                    } else {
+                        break;
+                    }
                 } catch (...) {
                     break;
                 }
             }
         }
         
-        server.complete(ctx);
+        if (!segfault_occurred) {
+            server.complete(ctx);
+        }
+        
     } catch (ppstep::session_terminate const& e) {
         // Session terminated normally by user
         return 0;
     } catch (boost::wave::cpp_exception const& e) {
-        // Wave exceptions should be handled by throw_exception hook
-        // If we get here, it means the error wasn't suppressed
         std::cerr << "Preprocessing error: " << e.description() << std::endl;
         return 1;
     } catch (std::exception const& e) {
-        // Unexpected exception
         std::cerr << "Unexpected error: " << e.what() << std::endl;
+        return 1;
+    } catch (...) {
+        std::cerr << "Unknown error occurred" << std::endl;
         return 1;
     }
 
-    return 0;
+    return segfault_occurred ? 1 : 0;
 }
