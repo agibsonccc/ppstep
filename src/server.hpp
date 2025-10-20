@@ -330,6 +330,28 @@ namespace ppstep {
                 }
             }
             
+            // Determine if this is a fatal error that corrupts the lexer/context
+            bool is_fatal = false;
+            try {
+                auto error_code = e.get_errorcode();
+                
+                // Lexer errors are fatal - they corrupt the token stream
+                if (error_code >= boost::wave::lexing_exception::unexpected_error &&
+                    error_code <= boost::wave::lexing_exception::generic_lexing_error) {
+                    is_fatal = true;
+                }
+                
+                // Unterminated strings/comments/etc are fatal
+                if (error_msg.find("Unterminated") != std::string::npos ||
+                    error_msg.find("unterminated") != std::string::npos) {
+                    is_fatal = true;
+                }
+                
+            } catch (...) {
+                // If we can't determine, assume it's fatal to be safe
+                is_fatal = true;
+            }
+            
             // Notify client about the error
             try {
                 if (!debug && sink) {
@@ -341,12 +363,15 @@ namespace ppstep {
                 // Error reporting itself failed
             }
             
-            // ANY preprocessing error should stop macro expansion to prevent corruption
-            // The Wave context may be in an invalid state
             fatal_error_occurred = true;
             
-            // Return false to suppress the exception and let iterator finish cleanly
-            return false;
+            if (is_fatal) {
+                // Fatal errors - throw to stop immediately and prevent segfaults
+                return true;  // Let the exception propagate
+            } else {
+                // Non-fatal errors - suppress and try to continue
+                return false;
+            }
         }
 
         template <typename ContextT>
