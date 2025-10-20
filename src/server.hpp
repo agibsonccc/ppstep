@@ -292,21 +292,36 @@ namespace ppstep {
             }
         }
         
-        // Extract error information from Boost.Wave 1.89+ exceptions
+        // Extract comprehensive error information from Boost.Wave exceptions
+        // This hook is called BEFORE the exception is thrown, giving us a chance to suppress it
         template <typename ContextT, typename ExceptionT>
         bool throw_exception(ContextT& ctx, ExceptionT const& e) {
+            // Extract all available error information
             std::string error_msg;
             std::string file;
             int line = 0;
+            int column = 0;
+            unsigned int error_code = 0;
             
-            // Get description
+            // Get error description
             try {
                 error_msg = e.description();
             } catch (...) {
-                error_msg = e.what();
+                try {
+                    error_msg = e.what();
+                } catch (...) {
+                    error_msg = "<unknown error>";
+                }
             }
             
-            // Boost 1.89+ has file_name() and line_no() directly on exceptions
+            // Get error code to determine severity
+            try {
+                error_code = static_cast<unsigned int>(e.get_errorcode());
+            } catch (...) {
+                error_code = 0;
+            }
+            
+            // Get file location using Boost 1.89+ APIs
             try {
                 file = e.file_name();
             } catch (...) {
@@ -319,6 +334,7 @@ namespace ppstep {
                 }
             }
             
+            // Get line number
             try {
                 line = e.line_no();
             } catch (...) {
@@ -331,42 +347,118 @@ namespace ppstep {
                 }
             }
             
-            // Determine if this is a fatal error that corrupts the lexer/context
-            // Unterminated strings/comments/etc are fatal and corrupt the context
-            bool is_fatal = (error_msg.find("Unterminated") != std::string::npos ||
-                           error_msg.find("unterminated") != std::string::npos);
+            // Get column number if available
+            try {
+                auto pos = ctx.get_main_pos();
+                column = pos.get_column();
+            } catch (...) {
+                column = 0;
+            }
             
+            // Determine error severity using multiple heuristics
+            // Boost.Wave error codes: https://www.boost.org/doc/libs/1_89_0/libs/wave/doc/class_reference_exceptions.html
+            // Warning codes typically: 0-99
+            // Regular errors: 100-199
+            // Fatal/lexical errors: 200+
+            
+            bool is_warning = false;
+            bool is_fatal = false;
+            
+            // Check if explicitly a warning
+            if (error_msg.find("warning:") != std::string::npos ||
+                error_msg.find("Warning:") != std::string::npos ||
+                error_code < 100) {
+                is_warning = true;
+            }
+            
+            // Check for fatal errors that corrupt the lexer state
+            // These MUST terminate because the iterator becomes invalid
+            if (error_msg.find("Unterminated") != std::string::npos ||
+                error_msg.find("unterminated") != std::string::npos ||
+                error_msg.find("ill formed") != std::string::npos ||
+                error_msg.find("ill-formed") != std::string::npos ||
+                error_msg.find("lexical") != std::string::npos ||
+                error_code >= 200) {
+                is_fatal = true;
+            }
+            
+            // WARNINGS: Print and suppress - context remains valid
+            if (is_warning) {
+                std::cerr << "⚠️  Warning at " << file << ":" << line;
+                if (column > 0) std::cerr << ":" << column;
+                std::cerr << std::endl;
+                std::cerr << "    " << error_msg << std::endl;
+                
+                // Return false to suppress the exception and allow preprocessing to continue
+                return false;
+            }
+            
+            // FATAL ERRORS: Print full diagnostics and terminate
             if (is_fatal) {
-                // FATAL ERROR - lexer is corrupted
-                // Print error and EXIT IMMEDIATELY - do NOT return
                 std::cerr << "\n\n";
-                std::cerr << "════════════════════════════════════════════════════════\n";
+                std::cerr << "════════════════════════════════════════════════════════════════════\n";
                 std::cerr << "🛑 FATAL PREPROCESSING ERROR\n";
-                std::cerr << "════════════════════════════════════════════════════════\n";
-                std::cerr << "Error:  " << error_msg << "\n";
-                std::cerr << "File:   " << file << "\n";
-                std::cerr << "Line:   " << line << "\n";
-                std::cerr << "════════════════════════════════════════════════════════\n";
-                std::cerr << "The lexer is corrupted and cannot continue.\n";
-                std::cerr << "Fix the error in the source file and rebuild.\n";
-                std::cerr << "════════════════════════════════════════════════════════\n\n";
+                std::cerr << "════════════════════════════════════════════════════════════════════\n";
+                std::cerr << "\n";
+                std::cerr << "WHY:  " << error_msg << "\n";
+                std::cerr << "\n";
+                std::cerr << "WHERE:\n";
+                std::cerr << "  File:   " << file << "\n";
+                std::cerr << "  Line:   " << line << "\n";
+                if (column > 0) {
+                    std::cerr << "  Column: " << column << "\n";
+                }
+                std::cerr << "\n";
+                
+                // Try to get additional context from the expanding/rescanning stacks
+                if (state && !state->expanding.empty()) {
+                    std::cerr << "CONTEXT:\n";
+                    std::cerr << "  Currently expanding macro:\n";
+                    std::cerr << "    ";
+                    print_token_container(std::cerr, state->expanding.back());
+                    std::cerr << "\n";
+                }
+                
+                if (error_code > 0) {
+                    std::cerr << "\nError Code: " << error_code << "\n";
+                }
+                
+                std::cerr << "\n";
+                std::cerr << "REASON:\n";
+                std::cerr << "  This error corrupts the preprocessor's internal state.\n";
+                std::cerr << "  Continuing would cause undefined behavior or crashes.\n";
+                std::cerr << "\n";
+                std::cerr << "SOLUTION:\n";
+                std::cerr << "  Fix the syntax error in the source file and try again.\n";
+                std::cerr << "════════════════════════════════════════════════════════════════════\n\n";
+                
+                fatal_error_occurred = true;
                 std::exit(1);
             }
             
-            // Non-fatal error - notify client
-            try {
-                if (!debug && sink) {
-                    sink->on_error(error_msg, file, line);
-                } else if (debug) {
-                    std::cerr << "ERROR: " << error_msg << " at " << file << ":" << line << std::endl;
-                }
-            } catch (...) {
-                // Error reporting itself failed
+            // REGULAR ERRORS: Print diagnostics, try to suppress and continue
+            // These errors might not corrupt the context, so we try to continue
+            std::cerr << "\n";
+            std::cerr << "⚠️  Preprocessing Error at " << file << ":" << line;
+            if (column > 0) std::cerr << ":" << column;
+            std::cerr << "\n";
+            std::cerr << "    " << error_msg << "\n";
+            
+            if (state && !state->expanding.empty()) {
+                std::cerr << "    While expanding: ";
+                print_token_container(std::cerr, state->expanding.back());
+                std::cerr << "\n";
             }
             
-            fatal_error_occurred = true;
+            if (error_code > 0) {
+                std::cerr << "    Error code: " << error_code << "\n";
+            }
+            std::cerr << "\n";
+            std::cerr << "    Attempting to continue preprocessing...\n";
+            std::cerr << "\n";
             
-            // Non-fatal errors - suppress and try to continue
+            // Return false to suppress the exception and try to continue
+            // If this causes issues, the main loop's exception handler will catch it
             return false;
         }
 
