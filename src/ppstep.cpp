@@ -7,6 +7,8 @@
 #include <vector>
 #include <csignal>
 #include <setjmp.h>
+#include <cstring>
+#include <unistd.h>
 
 #include <boost/wave.hpp>
 #include <boost/wave/cpplexer/cpp_lex_token.hpp>
@@ -35,15 +37,18 @@ using context_type =
         ppstep::server<token_type, token_sequence_type>
     >;
 
-// Signal handler for segfaults
-static jmp_buf jump_buffer;
-static bool segfault_occurred = false;
+// Signal handler for segfaults - must be signal-safe
+static sigjmp_buf jump_buffer;
+static volatile sig_atomic_t segfault_occurred = 0;
 
 void segfault_handler(int sig) {
-    segfault_occurred = true;
-    std::cerr << "\n💥 Segmentation fault detected - Wave context corrupted after error" << std::endl;
-    std::cerr << "   Cannot continue preprocessing safely." << std::endl;
-    longjmp(jump_buffer, 1);
+    segfault_occurred = 1;
+    
+    // Use write() which is signal-safe (not std::cerr)
+    const char msg[] = "\n💥 Segmentation fault - Wave context corrupted\n   Terminating preprocessing.\n";
+    write(STDERR_FILENO, msg, sizeof(msg) - 1);
+    
+    siglongjmp(jump_buffer, 1);
 }
 
 static std::string read_entire_file(std::istream&& instream) {
@@ -130,19 +135,24 @@ int main(int argc, char const** argv) {
     }
 
     // Install segfault handler
-    std::signal(SIGSEGV, segfault_handler);
+    struct sigaction sa;
+    memset(&sa, 0, sizeof(sa));
+    sa.sa_handler = segfault_handler;
+    sigemptyset(&sa.sa_mask);
+    sa.sa_flags = 0;
+    sigaction(SIGSEGV, &sa, nullptr);
     
     // Set up error recovery jump point
-    if (setjmp(jump_buffer) != 0) {
+    if (sigsetjmp(jump_buffer, 1) != 0) {
         // Jumped here from segfault handler
-        std::cerr << "\nPreprocessing terminated due to fatal error." << std::endl;
+        std::cerr << "\n⚠️  Preprocessing could not continue after fatal error." << std::endl;
+        std::cerr << "Suggestion: Fix preprocessing errors in the source file and try again." << std::endl;
         return 1;
     }
 
     auto first = ctx.begin();
     auto last = ctx.end();
     
-    bool error_recovery_mode = false;
     int consecutive_errors = 0;
     const int MAX_CONSECUTIVE_ERRORS = 5;
     
@@ -150,23 +160,22 @@ int main(int argc, char const** argv) {
         server.start(ctx);
         
         // Main preprocessing loop with enhanced error recovery
-        while (first != last && !segfault_occurred) {
+        while (first != last && segfault_occurred == 0) {
             try {
                 // Validate iterator before dereferencing
                 if (first == last) break;
                 
-                // Try to get the token
+                // Try to get the token - THIS can segfault if context corrupted
                 const auto& token = *first;
                 
                 // Process it
                 server.lexed_token(ctx, token);
                 
-                // Try to advance
+                // Try to advance - THIS can also segfault
                 ++first;
                 
                 // Reset error counter on success
                 consecutive_errors = 0;
-                error_recovery_mode = false;
                 
             } catch (boost::wave::cpp_exception const& e) {
                 consecutive_errors++;
@@ -181,8 +190,6 @@ int main(int argc, char const** argv) {
                     std::cerr << "Wave exception #" << consecutive_errors 
                               << " during iteration: " << e.description() << std::endl;
                 }
-                
-                error_recovery_mode = true;
                 
                 // Try to advance past the error
                 try {
@@ -243,7 +250,7 @@ int main(int argc, char const** argv) {
             }
         }
         
-        if (!segfault_occurred) {
+        if (segfault_occurred == 0) {
             server.complete(ctx);
         }
         
@@ -261,5 +268,10 @@ int main(int argc, char const** argv) {
         return 1;
     }
 
-    return segfault_occurred ? 1 : 0;
+    if (segfault_occurred) {
+        std::cerr << "\n⚠️  Note: Segfault occurred during preprocessing." << std::endl;
+        return 1;
+    }
+
+    return 0;
 }
