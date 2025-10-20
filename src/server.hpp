@@ -331,26 +331,9 @@ namespace ppstep {
             }
             
             // Determine if this is a fatal error that corrupts the lexer/context
-            bool is_fatal = false;
-            try {
-                auto error_code = e.get_errorcode();
-                
-                // Lexer errors are fatal - they corrupt the token stream
-                if (error_code >= boost::wave::lexing_exception::unexpected_error &&
-                    error_code <= boost::wave::lexing_exception::generic_lexing_error) {
-                    is_fatal = true;
-                }
-                
-                // Unterminated strings/comments/etc are fatal
-                if (error_msg.find("Unterminated") != std::string::npos ||
-                    error_msg.find("unterminated") != std::string::npos) {
-                    is_fatal = true;
-                }
-                
-            } catch (...) {
-                // If we can't determine, assume it's fatal to be safe
-                is_fatal = true;
-            }
+            // Unterminated strings/comments/etc are fatal and corrupt the context
+            bool is_fatal = (error_msg.find("Unterminated") != std::string::npos ||
+                           error_msg.find("unterminated") != std::string::npos);
             
             // Notify client about the error
             try {
