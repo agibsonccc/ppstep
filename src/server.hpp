@@ -428,9 +428,6 @@ namespace ppstep {
             // Return TRUE = always throw exception to ppstep.cpp
             // ppstep.cpp will decide whether to log based on severity
             return true;
-        } back to ppstep.cpp main loop
-                return true;
-            }
         }
 
         template <typename ContextT>
