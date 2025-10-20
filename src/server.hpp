@@ -66,40 +66,45 @@ namespace ppstep {
                 IteratorT const& seqstart, IteratorT const& seqend) {
             if (evaluating_conditional || fatal_error_occurred) return false;
 
-            auto sanitized_arguments = std::vector<ContainerT>();
-            for (auto const& arg_container : arguments) {
-                sanitized_arguments.push_back(sanitize(arg_container));
-            }
-            
-            // Keep original with whitespace for recording
-            auto preserved_arguments = std::vector<ContainerT>();
-            for (auto const& arg_container : arguments) {
-                preserved_arguments.push_back(preserve_whitespace(arg_container));
-            }
+            try {
+                auto sanitized_arguments = std::vector<ContainerT>();
+                for (auto const& arg_container : arguments) {
+                    sanitized_arguments.push_back(sanitize(arg_container));
+                }
+                
+                // Keep original with whitespace for recording
+                auto preserved_arguments = std::vector<ContainerT>();
+                for (auto const& arg_container : arguments) {
+                    preserved_arguments.push_back(preserve_whitespace(arg_container));
+                }
 
-            auto full_call = ContainerT(seqstart, seqend);
-            {
-                full_call.push_front(macrocall);
-                full_call.push_back(*seqend);
-                full_call = sanitize(full_call);
-            }
-            
-            // Create preserved version for recording
-            auto full_call_preserved = ContainerT(seqstart, seqend);
-            {
-                full_call_preserved.push_front(macrocall);
-                full_call_preserved.push_back(*seqend);
-                full_call_preserved = preserve_whitespace(full_call_preserved);
-            }
-            
-            if (!debug) {
-                sink->on_expand_function(ctx, macrodef, sanitized_arguments, full_call, preserved_arguments, full_call_preserved);
-            } else {
-                std::cout << "F: ";
-                print_token_container(std::cout, full_call) << std::endl;
-            }
+                auto full_call = ContainerT(seqstart, seqend);
+                {
+                    full_call.push_front(macrocall);
+                    full_call.push_back(*seqend);
+                    full_call = sanitize(full_call);
+                }
+                
+                // Create preserved version for recording
+                auto full_call_preserved = ContainerT(seqstart, seqend);
+                {
+                    full_call_preserved.push_front(macrocall);
+                    full_call_preserved.push_back(*seqend);
+                    full_call_preserved = preserve_whitespace(full_call_preserved);
+                }
+                
+                if (!debug) {
+                    sink->on_expand_function(ctx, macrodef, sanitized_arguments, full_call, preserved_arguments, full_call_preserved);
+                } else {
+                    std::cout << "F: ";
+                    print_token_container(std::cout, full_call) << std::endl;
+                }
 
-            state->expanding.push_back(full_call);
+                state->expanding.push_back(full_call);
+            } catch (...) {
+                // Any exception in hook processing means corrupted state
+                fatal_error_occurred = true;
+            }
 
             return false;
         }
@@ -110,14 +115,19 @@ namespace ppstep {
                 ContainerT const& definition, TokenT const& macrocall) {
             if (evaluating_conditional || fatal_error_occurred) return false;
             
-            if (!debug) {
-                sink->on_expand_object(ctx, macrocall);
-            } else {
-                std::cout << "O: ";
-                print_token(std::cout, macrocall) << std::endl;
-            }
+            try {
+                if (!debug) {
+                    sink->on_expand_object(ctx, macrocall);
+                } else {
+                    std::cout << "O: ";
+                    print_token(std::cout, macrocall) << std::endl;
+                }
 
-            state->expanding.push_back({macrocall});
+                state->expanding.push_back({macrocall});
+            } catch (...) {
+                fatal_error_occurred = true;
+            }
+            
             return false;
         }
 
@@ -125,40 +135,47 @@ namespace ppstep {
         void expanded_macro(ContextT& ctx, ContainerT const& result) {
             if (evaluating_conditional || fatal_error_occurred) return;
 
-            auto const& initial = *(state->expanding.rbegin());
-            
-            if (!debug) {
-                 // Pass both sanitized and preserved versions
-                 sink->on_expanded(ctx, sanitize(initial), sanitize(result), 
-                                  preserve_whitespace(initial), preserve_whitespace(result));
-            } else {
-                std::cout << "E: ";
-                print_token_container(std::cout, sanitize(initial)) << " -> ";
-                print_token_container(std::cout, sanitize(result)) << std::endl;
+            try {
+                auto const& initial = *(state->expanding.rbegin());
+                
+                if (!debug) {
+                     // Pass both sanitized and preserved versions
+                     sink->on_expanded(ctx, sanitize(initial), sanitize(result), 
+                                      preserve_whitespace(initial), preserve_whitespace(result));
+                } else {
+                    std::cout << "E: ";
+                    print_token_container(std::cout, sanitize(initial)) << " -> ";
+                    print_token_container(std::cout, sanitize(result)) << std::endl;
+                }
+
+                state->rescanning.push_back({initial, result});
+                state->expanding.pop_back();
+            } catch (...) {
+                fatal_error_occurred = true;
             }
-
-            state->rescanning.push_back({initial, result});
-
-            state->expanding.pop_back();
         }
 
         template <typename ContextT>
         void rescanned_macro(ContextT& ctx, ContainerT const& result) {
             if (evaluating_conditional || fatal_error_occurred) return;
 
-            auto const& [cause, initial] = *(state->rescanning.rbegin());
+            try {
+                auto const& [cause, initial] = *(state->rescanning.rbegin());
 
-            if (!debug) {
-                // Pass both sanitized and preserved versions
-                sink->on_rescanned(ctx, sanitize(cause), sanitize(initial), sanitize(result),
-                                  preserve_whitespace(cause), preserve_whitespace(initial), preserve_whitespace(result));
-            } else {
-                std::cout << "R: ";
-                print_token_container(std::cout, sanitize(initial)) << " -> ";
-                print_token_container(std::cout, sanitize(result)) << std::endl;
+                if (!debug) {
+                    // Pass both sanitized and preserved versions
+                    sink->on_rescanned(ctx, sanitize(cause), sanitize(initial), sanitize(result),
+                                      preserve_whitespace(cause), preserve_whitespace(initial), preserve_whitespace(result));
+                } else {
+                    std::cout << "R: ";
+                    print_token_container(std::cout, sanitize(initial)) << " -> ";
+                    print_token_container(std::cout, sanitize(result)) << std::endl;
+                }
+
+                state->rescanning.pop_back();
+            } catch (...) {
+                fatal_error_occurred = true;
             }
-
-            state->rescanning.pop_back();
         }
         
         template <typename ContextT>
@@ -257,13 +274,20 @@ namespace ppstep {
 
         template <typename ContextT>
         void lexed_token(ContextT& ctx, TokenT const& result) {
-            if (should_skip_token(result) || fatal_error_occurred) return;
+            if (should_skip_token(result)) return;
+            
+            // Don't process hooks if fatal error, but don't crash either
+            if (fatal_error_occurred) return;
 
-            if (!debug) {
-                sink->on_lexed(ctx, result);
-            } else {
-                std::cout << "L: ";
-                print_token(std::cout, result) << std::endl;
+            try {
+                if (!debug) {
+                    sink->on_lexed(ctx, result);
+                } else {
+                    std::cout << "L: ";
+                    print_token(std::cout, result) << std::endl;
+                }
+            } catch (...) {
+                // Ignore errors during error recovery
             }
         }
         
@@ -279,19 +303,6 @@ namespace ppstep {
                 error_msg = e.description();
             } catch (...) {
                 error_msg = e.what();
-            }
-            
-            // Check for truly fatal errors (not warnings or recoverable errors)
-            bool is_fatal = false;
-            std::string error_lower = error_msg;
-            std::transform(error_lower.begin(), error_lower.end(), error_lower.begin(), ::tolower);
-            
-            // Only mark catastrophic failures as fatal
-            // Lexer warnings and syntax errors are NOT fatal
-            if (error_lower.find("internal error") != std::string::npos ||
-                error_lower.find("unable to open") != std::string::npos ||
-                error_lower.find("file not found") != std::string::npos) {
-                is_fatal = true;
             }
             
             // Boost 1.89+ has file_name() and line_no() directly on exceptions
@@ -320,22 +331,21 @@ namespace ppstep {
             }
             
             // Notify client about the error
-            if (!debug && sink) {
-                sink->on_error(error_msg, file, line);
-            } else if (debug) {
-                std::cerr << "ERROR: " << error_msg << " at " << file << ":" << line << std::endl;
-            }
-            
-            // Mark fatal errors to stop further processing hooks
-            if (is_fatal) {
-                fatal_error_occurred = true;
-                if (!debug) {
-                    std::cerr << "⚠️  Fatal preprocessing error - stopping macro expansion" << std::endl;
+            try {
+                if (!debug && sink) {
+                    sink->on_error(error_msg, file, line);
+                } else if (debug) {
+                    std::cerr << "ERROR: " << error_msg << " at " << file << ":" << line << std::endl;
                 }
+            } catch (...) {
+                // Error reporting itself failed
             }
             
-            // Return false to suppress the exception and continue lexing
-            // but hooks will check fatal_error_occurred flag
+            // ANY preprocessing error should stop macro expansion to prevent corruption
+            // The Wave context may be in an invalid state
+            fatal_error_occurred = true;
+            
+            // Return false to suppress the exception and let iterator finish cleanly
             return false;
         }
 
