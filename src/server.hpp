@@ -478,13 +478,7 @@ namespace ppstep {
             // Determine action based on severity
             if (severity == boost::wave::util::severity_remark || 
                 severity == boost::wave::util::severity_warning) {
-                // WARNINGS/REMARKS: Log and continue
-                const char* severity_symbol = (severity == boost::wave::util::severity_remark) ? "ℹ️ " : "⚠️ ";
-                
-                std::cerr << severity_symbol << " " << file << ":" << line;
-                if (column > 0) std::cerr << ":" << column;
-                std::cerr << " - " << error_msg << std::endl;
-                
+                // WARNINGS/REMARKS: Silently suppress and continue
                 // Return FALSE = suppress exception, continue processing
                 return false;
             } else {
