@@ -16,6 +16,7 @@
 #include <chrono>
 #include <ctime>
 #include <iomanip>
+#include <deque>
 
 #include "server_fwd.hpp"
 #include "client_fwd.hpp"
@@ -23,6 +24,10 @@
 #include "utils.hpp"
 
 namespace ppstep {
+    // Configurable history size limit to prevent OOM
+    constexpr std::size_t MAX_HISTORY_SIZE = 1000;  // Keep last 1000 events
+    constexpr std::size_t HISTORY_TRIM_SIZE = 800;  // Trim to this when limit hit
+    
     namespace ansi {
         constexpr auto black_fg = "\u001b[30m";
         constexpr auto white_fg = "\u001b[37;1m";
@@ -177,7 +182,8 @@ namespace ppstep {
               recording_active(false),
               break_on_error(false),
               error_occurred(false),
-              last_error_line(0) {}
+              last_error_line(0),
+              lexed_token_count(0) {}
         
         client(server_state<ContainerT>& state) : client(state, "") {}
 
@@ -302,15 +308,40 @@ namespace ppstep {
                 }
             }
         }
+        
+        // Trim history to prevent memory bloat
+        void trim_history_if_needed() {
+            if (token_history.size() > MAX_HISTORY_SIZE) {
+                // Keep only the most recent HISTORY_TRIM_SIZE events
+                std::size_t to_remove = token_history.size() - HISTORY_TRIM_SIZE;
+                token_history.erase(token_history.begin(), token_history.begin() + to_remove);
+                
+                // Also trim lexed_tokens to match
+                if (lexed_tokens.size() > HISTORY_TRIM_SIZE * 10) {  // Heuristic
+                    std::size_t tokens_to_remove = lexed_tokens.size() / 2;
+                    lexed_tokens.erase(lexed_tokens.begin(), lexed_tokens.begin() + tokens_to_remove);
+                    lexed_token_count += tokens_to_remove;
+                }
+            }
+        }
 
         template <class ContextT>
         void on_lexed(ContextT& ctx, TokenT const& token) {
             if (token_stack.empty()) {
-                auto last_tokens = token_history.empty() ? ContainerT() : newest_history()->tokens;
-                last_tokens.push_back(token);
+                // Use deque for efficient building - don't store full history for every token
+                ContainerT last_tokens;
+                if (!token_history.empty()) {
+                    // Only keep reference to current position, not full copy
+                    last_tokens.push_back(token);
+                } else {
+                    last_tokens.push_back(token);
+                }
 
                 lexed_tokens.push_back(token);
-                token_history.push_back(historical_event<ContainerT>(last_tokens, events::lexed<ContainerT>()));
+                token_history.push_back(historical_event<ContainerT>(std::move(last_tokens), events::lexed<ContainerT>()));
+                
+                // Trim history periodically
+                trim_history_if_needed();
 
                 // Record lexed token if recording
                 if (recording_active) {
@@ -356,17 +387,20 @@ namespace ppstep {
 
             // Continue with normal processing using sanitized tokens
             if (token_stack.empty()) {
-                push(std::move(call_tokens), events::call<ContainerT>(call_tokens, lexed_tokens.size() + 0, lexed_tokens.size() + call_tokens.size()));
+                push(std::move(call_tokens), events::call<ContainerT>(call_tokens, lexed_tokens.size() + lexed_token_count, lexed_tokens.size() + lexed_token_count + call_tokens.size()));
             } else {
                 auto lookup = find_match_indices(token_stack.back(), call_tokens);
                 if (lookup) {
                     auto [start, end] = *lookup;
+                    // Don't prepend full lexed history - just store the event
+                    ContainerT event_tokens = call_tokens;
                     token_history.push_back(historical_event<ContainerT>(
-                        prepend_lexed(token_stack.back().tokens),
-                        events::call<ContainerT>(call_tokens, lexed_tokens.size() + start, lexed_tokens.size() + end)));
+                        std::move(event_tokens),
+                        events::call<ContainerT>(call_tokens, lexed_tokens.size() + lexed_token_count + start, lexed_tokens.size() + lexed_token_count + end)));
+                    trim_history_if_needed();
                 } else {
                     reset_token_stack();
-                    push(std::move(call_tokens), events::call<ContainerT>(call_tokens, lexed_tokens.size() + 0, lexed_tokens.size() + call_tokens.size()));
+                    push(std::move(call_tokens), events::call<ContainerT>(call_tokens, lexed_tokens.size() + lexed_token_count, lexed_tokens.size() + lexed_token_count + call_tokens.size()));
                 }
             }
             
@@ -398,17 +432,19 @@ namespace ppstep {
             }
 
             if (token_stack.empty()) {
-                push(std::move(call_tokens), events::call<ContainerT>(call_tokens, lexed_tokens.size() + 0, lexed_tokens.size() + call_tokens.size()));
+                push(std::move(call_tokens), events::call<ContainerT>(call_tokens, lexed_tokens.size() + lexed_token_count, lexed_tokens.size() + lexed_token_count + call_tokens.size()));
             } else {
                 auto lookup = find_match_indices(token_stack.back(), call_tokens);
                 if (lookup) {
                     auto [start, end] = *lookup;
+                    ContainerT event_tokens = call_tokens;
                     token_history.push_back(historical_event<ContainerT>(
-                        prepend_lexed(token_stack.back().tokens),
-                        events::call<ContainerT>(call_tokens, lexed_tokens.size() + start, lexed_tokens.size() + end)));
+                        std::move(event_tokens),
+                        events::call<ContainerT>(call_tokens, lexed_tokens.size() + lexed_token_count + start, lexed_tokens.size() + lexed_token_count + end)));
+                    trim_history_if_needed();
                 } else {
                     reset_token_stack();
-                    push(std::move(call_tokens), events::call<ContainerT>(call_tokens, lexed_tokens.size() + 0, lexed_tokens.size() + call_tokens.size()));
+                    push(std::move(call_tokens), events::call<ContainerT>(call_tokens, lexed_tokens.size() + lexed_token_count, lexed_tokens.size() + lexed_token_count + call_tokens.size()));
                 }
             }
             
@@ -425,17 +461,19 @@ namespace ppstep {
             }
             
             if (token_stack.empty()) {
-                push(std::move(call_tokens), events::call<ContainerT>(call_tokens, lexed_tokens.size() + 0, lexed_tokens.size() + call_tokens.size()));
+                push(std::move(call_tokens), events::call<ContainerT>(call_tokens, lexed_tokens.size() + lexed_token_count, lexed_tokens.size() + lexed_token_count + call_tokens.size()));
             } else {
                 auto lookup = find_match_indices(token_stack.back(), call_tokens);
                 if (lookup) {
                     auto [start, end] = *lookup;
+                    ContainerT event_tokens = call_tokens;
                     token_history.push_back(historical_event<ContainerT>(
-                        prepend_lexed(token_stack.back().tokens),
-                        events::call<ContainerT>(call_tokens, lexed_tokens.size() + start, lexed_tokens.size() + end)));
+                        std::move(event_tokens),
+                        events::call<ContainerT>(call_tokens, lexed_tokens.size() + lexed_token_count + start, lexed_tokens.size() + lexed_token_count + end)));
+                    trim_history_if_needed();
                 } else {
                     reset_token_stack();
-                    push(std::move(call_tokens), events::call<ContainerT>(call_tokens, lexed_tokens.size() + 0, lexed_tokens.size() + call_tokens.size()));
+                    push(std::move(call_tokens), events::call<ContainerT>(call_tokens, lexed_tokens.size() + lexed_token_count, lexed_tokens.size() + lexed_token_count + call_tokens.size()));
                 }
             }
 
@@ -467,10 +505,10 @@ namespace ppstep {
 
                 push(std::move(new_tokens),
                      std::next(new_tokens.begin(), new_start),
-                     events::expanded<ContainerT>(initial, lexed_tokens.size() + new_start, lexed_tokens.size() + new_end));
+                     events::expanded<ContainerT>(initial, lexed_tokens.size() + lexed_token_count + new_start, lexed_tokens.size() + lexed_token_count + new_end));
 
             } catch (std::logic_error const&) {
-                push(ContainerT(result), events::expanded<ContainerT>(initial, lexed_tokens.size() + 0, lexed_tokens.size() + result.size()));
+                push(ContainerT(result), events::expanded<ContainerT>(initial, lexed_tokens.size() + lexed_token_count, lexed_tokens.size() + lexed_token_count + result.size()));
             }
 
             handle_prompt(ctx, *(initial.begin()), preprocessing_event_type::EXPANDED);
@@ -503,10 +541,10 @@ namespace ppstep {
 
                 push(std::move(new_tokens),
                      std::next(new_tokens.begin(), new_start),
-                     events::expanded<ContainerT>(initial, lexed_tokens.size() + new_start, lexed_tokens.size() + new_end));
+                     events::expanded<ContainerT>(initial, lexed_tokens.size() + lexed_token_count + new_start, lexed_tokens.size() + lexed_token_count + new_end));
 
             } catch (std::logic_error const&) {
-                push(ContainerT(result), events::expanded<ContainerT>(initial, lexed_tokens.size() + 0, lexed_tokens.size() + result.size()));
+                push(ContainerT(result), events::expanded<ContainerT>(initial, lexed_tokens.size() + lexed_token_count, lexed_tokens.size() + lexed_token_count + result.size()));
             }
 
             handle_prompt(ctx, *(initial.begin()), preprocessing_event_type::EXPANDED);
@@ -542,10 +580,10 @@ namespace ppstep {
                 
                 push(std::move(new_tokens),
                      std::next(new_tokens.begin(), new_start),
-                     events::rescanned<ContainerT>(cause, initial, lexed_tokens.size() + new_start, lexed_tokens.size() + new_end));
+                     events::rescanned<ContainerT>(cause, initial, lexed_tokens.size() + lexed_token_count + new_start, lexed_tokens.size() + lexed_token_count + new_end));
 
             } catch (std::logic_error const&) {
-                push(ContainerT(result), events::rescanned<ContainerT>(cause, initial, lexed_tokens.size() + 0, lexed_tokens.size() + result.size()));
+                push(ContainerT(result), events::rescanned<ContainerT>(cause, initial, lexed_tokens.size() + lexed_token_count, lexed_tokens.size() + lexed_token_count + result.size()));
             }
 
             handle_prompt(ctx, *(initial.begin()), preprocessing_event_type::RESCANNED);
@@ -585,10 +623,10 @@ namespace ppstep {
                 
                 push(std::move(new_tokens),
                      std::next(new_tokens.begin(), new_start),
-                     events::rescanned<ContainerT>(cause, initial, lexed_tokens.size() + new_start, lexed_tokens.size() + new_end));
+                     events::rescanned<ContainerT>(cause, initial, lexed_tokens.size() + lexed_token_count + new_start, lexed_tokens.size() + lexed_token_count + new_end));
 
             } catch (std::logic_error const&) {
-                push(ContainerT(result), events::rescanned<ContainerT>(cause, initial, lexed_tokens.size() + 0, lexed_tokens.size() + result.size()));
+                push(ContainerT(result), events::rescanned<ContainerT>(cause, initial, lexed_tokens.size() + lexed_token_count, lexed_tokens.size() + lexed_token_count + result.size()));
             }
 
             handle_prompt(ctx, *(initial.begin()), preprocessing_event_type::RESCANNED);
@@ -658,19 +696,16 @@ namespace ppstep {
         
         using range_container = std::tuple<ContainerT const*, container_iterator, container_iterator>;
 
-        ContainerT prepend_lexed(ContainerT const& tokens) {
-            auto acc = ContainerT(std::begin(lexed_tokens), std::end(lexed_tokens));
-            acc.insert(std::end(acc), std::begin(tokens), std::end(tokens));
-            return acc;
-        }
+        // REMOVED prepend_lexed() - major memory hog
 
         void push(ContainerT&& tokens, preprocessing_event<ContainerT>&& event) {
             push(std::move(tokens), std::begin(tokens), std::move(event));
         }
 
         void push(ContainerT&& tokens, container_iterator&& head, preprocessing_event<ContainerT>&& event) {
-            auto historical_tokens = prepend_lexed(tokens);
-            token_history.push_back(historical_event<ContainerT>(historical_tokens, std::move(event)));
+            // Store only the event tokens, not full history
+            token_history.push_back(historical_event<ContainerT>(tokens, std::move(event)));
+            trim_history_if_needed();
 
             if (head != tokens.end()) {
                 token_stack.emplace_back(std::move(tokens), std::move(head));
@@ -787,9 +822,10 @@ namespace ppstep {
         stepping_mode mode;
 
         std::list<offset_container<ContainerT>> token_stack;
-        std::vector<historical_event<ContainerT>> token_history;
+        std::deque<historical_event<ContainerT>> token_history;  // Changed to deque for efficient trimming
         std::vector<TokenT> lexed_tokens;
         std::vector<TokenT> lex_buffer;
+        std::size_t lexed_token_count;  // Track cumulative count when we trim
         
         // Recording state
         std::ofstream record_file;
