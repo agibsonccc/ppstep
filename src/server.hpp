@@ -384,9 +384,12 @@ namespace ppstep {
         template <typename ContextT>
         void complete(ContextT& ctx) {
             if (debug) return;
-
+            
             // CRITICAL: Don't try to print event history if tokens are corrupted
-            if (state->disable_printing) return;
+            if (state->disable_printing) {
+                std::cerr << "\n⚠️  Preprocessing stopped due to error - output may be incomplete" << std::endl;
+                return;
+            }
 
             sink->on_complete(ctx);
         }
