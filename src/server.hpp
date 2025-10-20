@@ -5,6 +5,10 @@
 #include <string>
 #include <type_traits>
 #include <cstdlib>
+#include <fstream>
+#include <chrono>
+#include <iomanip>
+#include <sstream>
 
 #include "server_fwd.hpp"
 #include "client.hpp"
@@ -66,7 +70,8 @@ namespace ppstep {
                 ContainerT const& definition,
                 TokenT const& macrocall, std::vector<ContainerT> const& arguments,
                 IteratorT const& seqstart, IteratorT const& seqend) {
-            if (evaluating_conditional || fatal_error_occurred) return false;
+            // CRITICAL: Don't record anything after error - tokens may be corrupted
+            if (evaluating_conditional || fatal_error_occurred || state->disable_printing) return false;
 
             try {
                 auto sanitized_arguments = std::vector<ContainerT>();
@@ -116,7 +121,8 @@ namespace ppstep {
         bool expanding_object_like_macro(
                 ContextT& ctx, TokenT const& macrodef,
                 ContainerT const& definition, TokenT const& macrocall) {
-            if (evaluating_conditional || fatal_error_occurred) return false;
+            // CRITICAL: Don't record anything after error - tokens may be corrupted
+            if (evaluating_conditional || fatal_error_occurred || state->disable_printing) return false;
             
             try {
                 if (!debug) {
@@ -137,7 +143,8 @@ namespace ppstep {
 
         template <typename ContextT>
         void expanded_macro(ContextT& ctx, ContainerT const& result) {
-            if (evaluating_conditional || fatal_error_occurred) return;
+            // CRITICAL: Don't record anything after error - tokens may be corrupted
+            if (evaluating_conditional || fatal_error_occurred || state->disable_printing) return;
 
             try {
                 auto const& initial = *(state->expanding.rbegin());
@@ -162,7 +169,8 @@ namespace ppstep {
 
         template <typename ContextT>
         void rescanned_macro(ContextT& ctx, ContainerT const& result) {
-            if (evaluating_conditional || fatal_error_occurred) return;
+            // CRITICAL: Don't record anything after error - tokens may be corrupted
+            if (evaluating_conditional || fatal_error_occurred || state->disable_printing) return;
 
             try {
                 auto const& [cause, initial] = *(state->rescanning.rbegin());
@@ -186,7 +194,7 @@ namespace ppstep {
         
         template <typename ContextT>
         bool found_directive(ContextT const& ctx, TokenT const& directive) {
-            if (fatal_error_occurred) return false;
+            if (fatal_error_occurred || state->disable_printing) return false;
             
             auto directive_id = boost::wave::token_id(directive);
             switch (directive_id) {
@@ -205,7 +213,7 @@ namespace ppstep {
         
         template <typename ContextT>
         bool evaluated_conditional_expression(ContextT const& ctx, TokenT const& directive, ContainerT const& expression, bool expression_value) {
-            if (fatal_error_occurred) return false;
+            if (fatal_error_occurred || state->disable_printing) return false;
             
             evaluating_conditional = false;
             return false;
@@ -227,7 +235,7 @@ namespace ppstep {
         bool found_unknown_directive(ContextT const& ctx, 
                                     ContainerT2 const& line, 
                                     ContainerT2& pending) {
-            if (fatal_error_occurred) return false;
+            if (fatal_error_occurred || state->disable_printing) return false;
             
             // Check if this is a GCC-specific pragma or other problematic directive
             if (!line.empty()) {
@@ -283,7 +291,7 @@ namespace ppstep {
             if (should_skip_token(result)) return;
             
             // Don't process hooks if fatal error, but don't crash either
-            if (fatal_error_occurred) return;
+            if (fatal_error_occurred || state->disable_printing) return;
 
             try {
                 if (!debug) {
@@ -297,80 +305,137 @@ namespace ppstep {
             }
         }
         
-        // Log the error and always throw (even for warnings) because Wave's iterator gets corrupted
+        // Dump full error context to log file and exit
         template <typename ContextT, typename ExceptionT>
-        bool throw_exception(ContextT& ctx, ExceptionT const& e) {
-            // Extract error information
-            std::string error_msg;
-            std::string file;
-            int line = 0;
-            int column = 0;
-            int severity = boost::wave::util::severity_fatal; // default to fatal
+        void dump_error_and_exit(ContextT& ctx, ExceptionT const& e) {
+            // Get timestamp for log filename
+            auto now = std::chrono::system_clock::now();
+            auto time_t = std::chrono::system_clock::to_time_t(now);
+            std::stringstream log_filename;
+            log_filename << "ppstep_error_" << std::put_time(std::localtime(&time_t), "%Y%m%d_%H%M%S") << ".log";
             
-            try {
-                error_msg = e.description();
-            } catch (...) {
-                try {
-                    error_msg = e.what();
-                } catch (...) {
-                    error_msg = "<unknown error>";
-                }
+            std::ofstream log(log_filename.str());
+            if (!log.is_open()) {
+                std::cerr << "ERROR: Could not create log file: " << log_filename.str() << std::endl;
+                std::exit(1);
             }
             
-            try {
-                file = e.file_name();
-            } catch (...) {
+            // Write header
+            log << "========================================" << std::endl;
+            log << "PPSTEP PREPROCESSING ERROR LOG" << std::endl;
+            log << "========================================" << std::endl;
+            log << "Timestamp: " << std::put_time(std::localtime(&time_t), "%Y-%m-%d %H:%M:%S") << std::endl;
+            log << std::endl;
+            
+            // Extract and write error information
+            std::string error_msg = "<unknown>";
+            std::string file = "<unknown>";
+            int line = 0;
+            int column = 0;
+            int severity = boost::wave::util::severity_fatal;
+            
+            try { error_msg = e.description(); } catch (...) {
+                try { error_msg = e.what(); } catch (...) {}
+            }
+            
+            try { file = e.file_name(); } catch (...) {
                 try {
                     auto pos = ctx.get_main_pos();
                     file = std::string(pos.get_file().begin(), pos.get_file().end());
-                } catch (...) {
-                    file = "<unknown>";
-                }
+                } catch (...) {}
             }
             
-            try {
-                line = e.line_no();
-            } catch (...) {
+            try { line = e.line_no(); } catch (...) {
                 try {
                     auto pos = ctx.get_main_pos();
                     line = pos.get_line();
-                } catch (...) {
-                    line = 0;
-                }
+                } catch (...) {}
             }
             
             try {
                 auto pos = ctx.get_main_pos();
                 column = pos.get_column();
-            } catch (...) {
-                column = 0;
-            }
+            } catch (...) {}
             
-            // Get severity level
+            try { severity = e.get_severity(); } catch (...) {}
+            
+            // Write error details
+            log << "ERROR DETAILS:" << std::endl;
+            log << "  Severity: ";
+            switch (severity) {
+                case boost::wave::util::severity_remark: log << "Remark"; break;
+                case boost::wave::util::severity_warning: log << "Warning"; break;
+                case boost::wave::util::severity_error: log << "Error"; break;
+                case boost::wave::util::severity_fatal: log << "Fatal"; break;
+                default: log << "Unknown"; break;
+            }
+            log << " (" << severity << ")" << std::endl;
+            log << "  Message: " << error_msg << std::endl;
+            log << std::endl;
+            
+            log << "LOCATION:" << std::endl;
+            log << "  File: " << file << std::endl;
+            log << "  Line: " << line << std::endl;
+            log << "  Column: " << column << std::endl;
+            log << std::endl;
+            
+            // Try to get context information
+            log << "CONTEXT:" << std::endl;
             try {
-                severity = e.get_severity();
+                auto pos = ctx.get_main_pos();
+                log << "  Current file: " << std::string(pos.get_file().begin(), pos.get_file().end()) << std::endl;
+                log << "  Current line: " << pos.get_line() << std::endl;
+                log << "  Current column: " << pos.get_column() << std::endl;
             } catch (...) {
-                // If we can't get severity, default to fatal (throw exception)
-                severity = boost::wave::util::severity_fatal;
+                log << "  (Unable to retrieve context position)" << std::endl;
             }
+            log << std::endl;
             
-            // Log the error/warning based on severity
-            const char* severity_symbol = "⚠️ ";
-            if (severity == boost::wave::util::severity_remark) {
-                severity_symbol = "ℹ️ ";
-            } else if (severity == boost::wave::util::severity_warning) {
-                severity_symbol = "⚠️ ";
-            } else {
-                severity_symbol = "❌";
+            // Write state information
+            log << "PREPROCESSING STATE:" << std::endl;
+            log << "  Expanding stack depth: " << state->expanding.size() << std::endl;
+            log << "  Rescanning stack depth: " << state->rescanning.size() << std::endl;
+            log << "  Evaluating conditional: " << (evaluating_conditional ? "yes" : "no") << std::endl;
+            log << std::endl;
+            
+            // Write exception type info
+            log << "EXCEPTION INFO:" << std::endl;
+            log << "  Type: " << typeid(e).name() << std::endl;
+            try {
+                log << "  What: " << e.what() << std::endl;
+            } catch (...) {
+                log << "  What: (unable to retrieve)" << std::endl;
             }
+            log << std::endl;
             
-            std::cerr << severity_symbol << " " << file << ":" << line;
+            log << "========================================" << std::endl;
+            log << "END OF ERROR LOG" << std::endl;
+            log << "========================================" << std::endl;
+            
+            log.close();
+            
+            // Print to stderr
+            std::cerr << "\n" << std::string(60, '=') << std::endl;
+            std::cerr << "❌ PREPROCESSING ERROR" << std::endl;
+            std::cerr << std::string(60, '=') << std::endl;
+            std::cerr << "Location: " << file << ":" << line;
             if (column > 0) std::cerr << ":" << column;
-            std::cerr << " - " << error_msg << std::endl;
+            std::cerr << std::endl;
+            std::cerr << "Message:  " << error_msg << std::endl;
+            std::cerr << "\nFull error context written to: " << log_filename.str() << std::endl;
+            std::cerr << std::string(60, '=') << std::endl;
             
-            // CRITICAL: Wave's iterator becomes corrupted after ANY exception (even warnings)
-            // Return TRUE for everything so the exception is caught cleanly in main loop
-            state->disable_printing = true;
+            // Exit cleanly
+            std::exit(1);
+        }
+        
+        // Log the error, dump full context, and exit
+        template <typename ContextT, typename ExceptionT>
+        bool throw_exception(ContextT& ctx, ExceptionT const& e) {
+            // Dump everything and exit - no recovery
+            dump_error_and_exit(ctx, e);
+            
+            // Never reached, but kept for interface compatibility
             return true;
         }
 
