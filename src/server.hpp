@@ -21,7 +21,7 @@ namespace ppstep {
     struct server : boost::wave::context_policies::eat_whitespace<TokenT> {
         using base_type = boost::wave::context_policies::eat_whitespace<TokenT>;
 
-        server(server_state<ContainerT>& state, client<TokenT, ContainerT>& sink, bool debug = false) : state(&state), sink(&sink), debug(debug), evaluating_conditional(false)  {}
+        server(server_state<ContainerT>& state, client<TokenT, ContainerT>& sink, bool debug = false) : state(&state), sink(&sink), debug(debug), evaluating_conditional(false), fatal_error_occurred(false)  {}
 
         ~server() {}
 
@@ -64,7 +64,7 @@ namespace ppstep {
                 ContainerT const& definition,
                 TokenT const& macrocall, std::vector<ContainerT> const& arguments,
                 IteratorT const& seqstart, IteratorT const& seqend) {
-            if (evaluating_conditional) return false;
+            if (evaluating_conditional || fatal_error_occurred) return false;
 
             auto sanitized_arguments = std::vector<ContainerT>();
             for (auto const& arg_container : arguments) {
@@ -108,7 +108,7 @@ namespace ppstep {
         bool expanding_object_like_macro(
                 ContextT& ctx, TokenT const& macrodef,
                 ContainerT const& definition, TokenT const& macrocall) {
-            if (evaluating_conditional) return false;
+            if (evaluating_conditional || fatal_error_occurred) return false;
             
             if (!debug) {
                 sink->on_expand_object(ctx, macrocall);
@@ -123,7 +123,7 @@ namespace ppstep {
 
         template <typename ContextT>
         void expanded_macro(ContextT& ctx, ContainerT const& result) {
-            if (evaluating_conditional) return;
+            if (evaluating_conditional || fatal_error_occurred) return;
 
             auto const& initial = *(state->expanding.rbegin());
             
@@ -144,7 +144,7 @@ namespace ppstep {
 
         template <typename ContextT>
         void rescanned_macro(ContextT& ctx, ContainerT const& result) {
-            if (evaluating_conditional) return;
+            if (evaluating_conditional || fatal_error_occurred) return;
 
             auto const& [cause, initial] = *(state->rescanning.rbegin());
 
@@ -163,6 +163,8 @@ namespace ppstep {
         
         template <typename ContextT>
         bool found_directive(ContextT const& ctx, TokenT const& directive) {
+            if (fatal_error_occurred) return false;
+            
             auto directive_id = boost::wave::token_id(directive);
             switch (directive_id) {
                 case boost::wave::T_PP_IF:
@@ -180,8 +182,9 @@ namespace ppstep {
         
         template <typename ContextT>
         bool evaluated_conditional_expression(ContextT const& ctx, TokenT const& directive, ContainerT const& expression, bool expression_value) {
+            if (fatal_error_occurred) return false;
+            
             evaluating_conditional = false;
-
             return false;
         }
         
@@ -201,6 +204,8 @@ namespace ppstep {
         bool found_unknown_directive(ContextT const& ctx, 
                                     ContainerT2 const& line, 
                                     ContainerT2& pending) {
+            if (fatal_error_occurred) return false;
+            
             // Check if this is a GCC-specific pragma or other problematic directive
             if (!line.empty()) {
                 auto it = line.begin();
@@ -252,7 +257,7 @@ namespace ppstep {
 
         template <typename ContextT>
         void lexed_token(ContextT& ctx, TokenT const& result) {
-            if (should_skip_token(result)) return;
+            if (should_skip_token(result) || fatal_error_occurred) return;
 
             if (!debug) {
                 sink->on_lexed(ctx, result);
@@ -274,6 +279,18 @@ namespace ppstep {
                 error_msg = e.description();
             } catch (...) {
                 error_msg = e.what();
+            }
+            
+            // Check for fatal errors that should stop processing
+            bool is_fatal = false;
+            std::string error_lower = error_msg;
+            std::transform(error_lower.begin(), error_lower.end(), error_lower.begin(), ::tolower);
+            
+            // Fatal error patterns
+            if (error_lower.find("unterminated") != std::string::npos ||
+                error_lower.find("internal error") != std::string::npos ||
+                error_lower.find("unable to open") != std::string::npos) {
+                is_fatal = true;
             }
             
             // Boost 1.89+ has file_name() and line_no() directly on exceptions
@@ -308,7 +325,16 @@ namespace ppstep {
                 std::cerr << "ERROR: " << error_msg << " at " << file << ":" << line << std::endl;
             }
             
-            // Return false to suppress the exception and continue processing
+            // Mark fatal errors to stop further processing hooks
+            if (is_fatal) {
+                fatal_error_occurred = true;
+                if (!debug) {
+                    std::cerr << "⚠️  Fatal preprocessing error - stopping macro expansion" << std::endl;
+                }
+            }
+            
+            // Return false to suppress the exception and continue lexing
+            // but hooks will check fatal_error_occurred flag
             return false;
         }
 
@@ -332,6 +358,7 @@ namespace ppstep {
 
         unsigned int conditional_nesting;
         bool evaluating_conditional;
+        bool fatal_error_occurred;
     };
 }
 

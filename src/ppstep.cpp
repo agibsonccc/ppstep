@@ -125,8 +125,45 @@ int main(int argc, char const** argv) {
         
         // Main preprocessing loop - exceptions are handled by throw_exception hook
         while (first != last) {
-            server.lexed_token(ctx, *first);
-            ++first;
+            try {
+                server.lexed_token(ctx, *first);
+                ++first;
+            } catch (boost::wave::cpp_exception const& e) {
+                // Wave exception during token iteration
+                // Error already handled by throw_exception hook, just continue if possible
+                if (args.count("debug")) {
+                    std::cerr << "Caught Wave exception during iteration, attempting to continue..." << std::endl;
+                }
+                try {
+                    ++first;  // Try to skip past the problematic token
+                } catch (...) {
+                    // Can't even advance iterator, must stop
+                    if (args.count("debug")) {
+                        std::cerr << "Cannot advance iterator, stopping." << std::endl;
+                    }
+                    break;
+                }
+            } catch (std::exception const& e) {
+                // Other exception
+                if (args.count("debug")) {
+                    std::cerr << "Caught exception during iteration: " << e.what() << ", attempting to continue..." << std::endl;
+                }
+                try {
+                    ++first;
+                } catch (...) {
+                    break;
+                }
+            } catch (...) {
+                // Unknown exception
+                if (args.count("debug")) {
+                    std::cerr << "Caught unknown exception during iteration, attempting to continue..." << std::endl;
+                }
+                try {
+                    ++first;
+                } catch (...) {
+                    break;
+                }
+            }
         }
         
         server.complete(ctx);
