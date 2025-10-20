@@ -258,18 +258,26 @@ namespace ppstep {
               | lexeme[
                   (lit("break") | lit("b")) >> *space > (
                         lit("error")[PPSTEP_ACTION(cl.set_break_on_error(true))]
-                      | ((lit("call") | lit("c")) > +space > anything[PPSTEP_ACTION(add_breakpoint(attr, preprocessing_event_type::CALL))])
-                      | ((lit("expand") | lit("e")) > +space > anything[PPSTEP_ACTION(add_breakpoint(attr, preprocessing_event_type::EXPANDED))])
-                      | ((lit("rescan") | lit("r")) > +space > anything[PPSTEP_ACTION(add_breakpoint(attr, preprocessing_event_type::RESCANNED))])
-                      | ((lit("lex") | lit("l")) > +space > anything[PPSTEP_ACTION(add_breakpoint(attr, preprocessing_event_type::LEXED))])
+                      | (lit("call") > +space > anything[PPSTEP_ACTION(add_breakpoint(attr, preprocessing_event_type::CALL))])
+                      | (lit("expand") > +space > anything[PPSTEP_ACTION(add_breakpoint(attr, preprocessing_event_type::EXPANDED))])
+                      | (lit("rescan") > +space > anything[PPSTEP_ACTION(add_breakpoint(attr, preprocessing_event_type::RESCANNED))])
+                      | (lit("lex") > +space > anything[PPSTEP_ACTION(add_breakpoint(attr, preprocessing_event_type::LEXED))])
+                      | (lit("c") > +space > anything[PPSTEP_ACTION(add_breakpoint(attr, preprocessing_event_type::CALL))])
+                      | (lit("e") > +space > anything[PPSTEP_ACTION(add_breakpoint(attr, preprocessing_event_type::EXPANDED))])
+                      | (lit("r") > +space > anything[PPSTEP_ACTION(add_breakpoint(attr, preprocessing_event_type::RESCANNED))])
+                      | (lit("l") > +space > anything[PPSTEP_ACTION(add_breakpoint(attr, preprocessing_event_type::LEXED))])
                 )]
               | lexeme[
                   (lit("delete") | lit("d")) >> *space > (
                         lit("error")[PPSTEP_ACTION(cl.set_break_on_error(false))]
-                      | ((lit("call") | lit("c")) > +space > anything[PPSTEP_ACTION(remove_breakpoint(attr, preprocessing_event_type::CALL))])
-                      | ((lit("expand") | lit("e")) > +space > anything[PPSTEP_ACTION(remove_breakpoint(attr, preprocessing_event_type::EXPANDED))])
-                      | ((lit("rescan") | lit("r")) > +space > anything[PPSTEP_ACTION(remove_breakpoint(attr, preprocessing_event_type::RESCANNED))])
-                      | ((lit("lex") | lit("l")) > +space > anything[PPSTEP_ACTION(remove_breakpoint(attr, preprocessing_event_type::LEXED))])
+                      | (lit("call") > +space > anything[PPSTEP_ACTION(remove_breakpoint(attr, preprocessing_event_type::CALL))])
+                      | (lit("expand") > +space > anything[PPSTEP_ACTION(remove_breakpoint(attr, preprocessing_event_type::EXPANDED))])
+                      | (lit("rescan") > +space > anything[PPSTEP_ACTION(remove_breakpoint(attr, preprocessing_event_type::RESCANNED))])
+                      | (lit("lex") > +space > anything[PPSTEP_ACTION(remove_breakpoint(attr, preprocessing_event_type::LEXED))])
+                      | (lit("c") > +space > anything[PPSTEP_ACTION(remove_breakpoint(attr, preprocessing_event_type::CALL))])
+                      | (lit("e") > +space > anything[PPSTEP_ACTION(remove_breakpoint(attr, preprocessing_event_type::EXPANDED))])
+                      | (lit("r") > +space > anything[PPSTEP_ACTION(remove_breakpoint(attr, preprocessing_event_type::RESCANNED))])
+                      | (lit("l") > +space > anything[PPSTEP_ACTION(remove_breakpoint(attr, preprocessing_event_type::LEXED))])
                 )]
               | lexeme[(lit("expand") | lit("e")) > +space > anything[PPSTEP_ACTION(expand_macro(ctx, attr))]]
               | lexeme[lit("#define") > +space > anything[PPSTEP_ACTION(define_macro(ctx, attr))]]
