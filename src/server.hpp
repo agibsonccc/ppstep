@@ -281,15 +281,16 @@ namespace ppstep {
                 error_msg = e.what();
             }
             
-            // Check for fatal errors that should stop processing
+            // Check for truly fatal errors (not warnings or recoverable errors)
             bool is_fatal = false;
             std::string error_lower = error_msg;
             std::transform(error_lower.begin(), error_lower.end(), error_lower.begin(), ::tolower);
             
-            // Fatal error patterns
-            if (error_lower.find("unterminated") != std::string::npos ||
-                error_lower.find("internal error") != std::string::npos ||
-                error_lower.find("unable to open") != std::string::npos) {
+            // Only mark catastrophic failures as fatal
+            // Lexer warnings and syntax errors are NOT fatal
+            if (error_lower.find("internal error") != std::string::npos ||
+                error_lower.find("unable to open") != std::string::npos ||
+                error_lower.find("file not found") != std::string::npos) {
                 is_fatal = true;
             }
             
