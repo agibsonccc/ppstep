@@ -297,7 +297,7 @@ namespace ppstep {
             }
         }
         
-        // Log the error, disable printing, and let the exception be thrown
+        // Log the error, disable printing, and suppress the exception
         template <typename ContextT, typename ExceptionT>
         bool throw_exception(ContextT& ctx, ExceptionT const& e) {
             // Extract error information
@@ -345,27 +345,17 @@ namespace ppstep {
                 column = 0;
             }
             
-            // Check if this is a warning or an error
-            bool is_warning = (error_msg.find("warning:") != std::string::npos);
+            // Log the error/warning
+            std::cerr << "⚠️  " << file << ":" << line;
+            if (column > 0) std::cerr << ":" << column;
+            std::cerr << " - " << error_msg << std::endl;
             
-            if (is_warning) {
-                // Log the warning
-                std::cerr << "⚠️  " << file << ":" << line;
-                if (column > 0) std::cerr << ":" << column;
-                std::cerr << " - " << error_msg << std::endl;
-                
-                // Return FALSE = suppress the exception, continue processing
-                return false;
-            } else {
-                // Fatal error - log it
-                std::cerr << "❌ " << file << ":" << line;
-                if (column > 0) std::cerr << ":" << column;
-                std::cerr << " - " << error_msg << std::endl;
-                std::cerr << "⚠️  Preprocessing could not continue after fatal error." << std::endl;
-                
-                // CRITICAL: Don't return to Wave with corrupted iterator - exit immediately
-                std::exit(1);
-            }
+            // CRITICAL: After ANY Wave error/warning, disable printing
+            // The token stream may be corrupted and accessing it causes segfaults
+            state->disable_printing = true;
+            
+            // Return FALSE = suppress ALL exceptions, continue processing
+            return false;
         }
 
         template <typename ContextT>
