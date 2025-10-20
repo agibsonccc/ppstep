@@ -4,6 +4,7 @@
 #include <vector>
 #include <string>
 #include <type_traits>
+#include <cstdlib>
 
 #include "server_fwd.hpp"
 #include "client.hpp"
@@ -335,7 +336,24 @@ namespace ppstep {
             bool is_fatal = (error_msg.find("Unterminated") != std::string::npos ||
                            error_msg.find("unterminated") != std::string::npos);
             
-            // Notify client about the error
+            if (is_fatal) {
+                // FATAL ERROR - lexer is corrupted
+                // Print error and EXIT IMMEDIATELY - do NOT return
+                std::cerr << "\n\n";
+                std::cerr << "════════════════════════════════════════════════════════\n";
+                std::cerr << "🛑 FATAL PREPROCESSING ERROR\n";
+                std::cerr << "════════════════════════════════════════════════════════\n";
+                std::cerr << "Error:  " << error_msg << "\n";
+                std::cerr << "File:   " << file << "\n";
+                std::cerr << "Line:   " << line << "\n";
+                std::cerr << "════════════════════════════════════════════════════════\n";
+                std::cerr << "The lexer is corrupted and cannot continue.\n";
+                std::cerr << "Fix the error in the source file and rebuild.\n";
+                std::cerr << "════════════════════════════════════════════════════════\n\n";
+                std::exit(1);
+            }
+            
+            // Non-fatal error - notify client
             try {
                 if (!debug && sink) {
                     sink->on_error(error_msg, file, line);
@@ -348,13 +366,8 @@ namespace ppstep {
             
             fatal_error_occurred = true;
             
-            if (is_fatal) {
-                // Fatal errors - throw to stop immediately and prevent segfaults
-                return true;  // Let the exception propagate
-            } else {
-                // Non-fatal errors - suppress and try to continue
-                return false;
-            }
+            // Non-fatal errors - suppress and try to continue
+            return false;
         }
 
         template <typename ContextT>
