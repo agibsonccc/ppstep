@@ -51,6 +51,7 @@ bool parse_args(int argc, char const** argv, po::variables_map& vm) {
         ("undefine,U", po::value<std::vector<std::string> >()->composing(),
             "specify a macro to undefine")
         ("debug", "enable debug tracing")
+        ("continue-on-error", "continue preprocessing after errors and collect all errors")
         ("input-file", po::value<std::string>()->required(), "input file");
 
     po::positional_options_description p;
@@ -91,7 +92,8 @@ int main(int argc, char const** argv) {
 
     auto server_state = ppstep::server_state<token_sequence_type>();
     auto client = ppstep::client<token_type, token_sequence_type>(server_state);
-    auto server = ppstep::server<token_type, token_sequence_type>(server_state, client,  args.count("debug"));
+    bool continue_on_error = args.count("continue-on-error") > 0;
+    auto server = ppstep::server<token_type, token_sequence_type>(server_state, client, args.count("debug"), continue_on_error);
     context_type ctx(instring.begin(), instring.end(), input_file, server);
 
     static_assert(std::is_same_v<token_sequence_type, typename context_type::token_sequence_type>,
@@ -125,6 +127,8 @@ int main(int argc, char const** argv) {
         }
     }
 
+    int error_count = 0;
+
     try {
         ppstep::crash_context_guard::set_operation("starting preprocessing");
         server.start(ctx);
@@ -143,28 +147,50 @@ int main(int argc, char const** argv) {
                 pos.get_column()
             );
             
-            const auto& token = *first;
-            
-            // Update token context (be careful - token might be corrupted)
             try {
-                if (token.is_valid()) {
-                    auto val = token.get_value();
-                    if (!val.empty()) {
-                        // Store token string (limit length for safety)
-                        static thread_local char token_buffer[256];
-                        size_t len = std::min(val.size(), sizeof(token_buffer) - 1);
-                        std::memcpy(token_buffer, val.c_str(), len);
-                        token_buffer[len] = '\0';
-                        ppstep::crash_context_guard::set_token(token_buffer);
+                const auto& token = *first;
+                
+                // Update token context (be careful - token might be corrupted)
+                try {
+                    if (token.is_valid()) {
+                        auto val = token.get_value();
+                        if (!val.empty()) {
+                            // Store token string (limit length for safety)
+                            static thread_local char token_buffer[256];
+                            size_t len = std::min(val.size(), sizeof(token_buffer) - 1);
+                            std::memcpy(token_buffer, val.c_str(), len);
+                            token_buffer[len] = '\0';
+                            ppstep::crash_context_guard::set_token(token_buffer);
+                        }
                     }
+                } catch (...) {
+                    // Token is corrupted, don't update context
+                    ppstep::crash_context_guard::set_token("<corrupted_token>");
                 }
-            } catch (...) {
-                // Token is corrupted, don't update context
-                ppstep::crash_context_guard::set_token("<corrupted_token>");
+                
+                server.lexed_token(ctx, token);
+                ++first;
+                
+            } catch (boost::wave::cpp_exception const& e) {
+                error_count++;
+                
+                if (continue_on_error) {
+                    // Error already logged by server's throw_exception hook
+                    // Continue to next token
+                    std::cerr << "\n⚠️  Error #" << error_count << " (continuing due to --continue-on-error)" << std::endl;
+                    
+                    // Try to advance past the error
+                    try {
+                        ++first;
+                    } catch (...) {
+                        std::cerr << "⚠️  Cannot advance past error, stopping iteration" << std::endl;
+                        break;
+                    }
+                } else {
+                    // Stop on first error
+                    throw;
+                }
             }
-            
-            server.lexed_token(ctx, token);
-            ++first;
         }
         
         ppstep::crash_context_guard::set_operation("completing preprocessing");
@@ -177,9 +203,15 @@ int main(int argc, char const** argv) {
         
     } catch (boost::wave::cpp_exception const& e) {
         // Wave exception - already logged by our hook
-        // Stop gracefully to avoid segfault
-        std::cerr << "\n⚠️  Stopping preprocessing due to error (processed what we could)" << std::endl;
+        if (!continue_on_error) {
+            std::cerr << "\n⚠️  Stopping preprocessing due to error (processed what we could)" << std::endl;
+        }
         ppstep::crash_context_guard::clear();
+        
+        if (error_count > 0) {
+            std::cerr << "\n📊 Total errors encountered: " << error_count << std::endl;
+            std::cerr << "💾 Check ppstep_error_*.log files for detailed error context" << std::endl;
+        }
         return 0;
         
     } catch (std::exception const& e) {
@@ -194,5 +226,13 @@ int main(int argc, char const** argv) {
     }
 
     ppstep::crash_context_guard::clear();
+    
+    if (error_count > 0) {
+        std::cerr << "\n📊 Total errors encountered: " << error_count << std::endl;
+        std::cerr << "💾 Check ppstep_error_*.log files for detailed error context" << std::endl;
+    } else {
+        std::cerr << "\n✅ Preprocessing completed successfully" << std::endl;
+    }
+    
     return 0;
 }

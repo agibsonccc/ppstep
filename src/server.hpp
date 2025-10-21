@@ -28,8 +28,8 @@ namespace ppstep {
     struct server : boost::wave::context_policies::eat_whitespace<TokenT> {
         using base_type = boost::wave::context_policies::eat_whitespace<TokenT>;
 
-        server(server_state<ContainerT>& state, client<TokenT, ContainerT>& sink, bool debug = false) 
-            : state(&state), sink(&sink), debug(debug), evaluating_conditional(false), fatal_error_occurred(false), main_input_file()  {}
+        server(server_state<ContainerT>& state, client<TokenT, ContainerT>& sink, bool debug = false, bool continue_on_error = false) 
+            : state(&state), sink(&sink), debug(debug), continue_on_error(continue_on_error), evaluating_conditional(false), fatal_error_occurred(false), main_input_file()  {}
 
         ~server() {}
 
@@ -69,7 +69,7 @@ namespace ppstep {
                 ContainerT const& definition,
                 TokenT const& macrocall, std::vector<ContainerT> const& arguments,
                 IteratorT const& seqstart, IteratorT const& seqend) {
-            if (evaluating_conditional || fatal_error_occurred || state->disable_printing) return false;
+            if (evaluating_conditional || (fatal_error_occurred && !continue_on_error) || state->disable_printing) return false;
 
             try {
                 // Update crash context - entering macro expansion
@@ -234,8 +234,10 @@ namespace ppstep {
 
                 state->expanding.push_back(full_call);
             } catch (...) {
-                fatal_error_occurred = true;
-                state->disable_printing = true;
+                if (!continue_on_error) {
+                    fatal_error_occurred = true;
+                    state->disable_printing = true;
+                }
                 crash_context_guard::exit_macro_expansion();
             }
 
@@ -246,7 +248,7 @@ namespace ppstep {
         bool expanding_object_like_macro(
                 ContextT& ctx, TokenT const& macrodef,
                 ContainerT const& definition, TokenT const& macrocall) {
-            if (evaluating_conditional || fatal_error_occurred || state->disable_printing) return false;
+            if (evaluating_conditional || (fatal_error_occurred && !continue_on_error) || state->disable_printing) return false;
             
             try {
                 // Update crash context - entering macro expansion
@@ -288,8 +290,10 @@ namespace ppstep {
 
                 state->expanding.push_back({macrocall});
             } catch (...) {
-                fatal_error_occurred = true;
-                state->disable_printing = true;
+                if (!continue_on_error) {
+                    fatal_error_occurred = true;
+                    state->disable_printing = true;
+                }
                 crash_context_guard::exit_macro_expansion();
             }
             
@@ -298,7 +302,7 @@ namespace ppstep {
 
         template <typename ContextT>
         void expanded_macro(ContextT& ctx, ContainerT const& result) {
-            if (evaluating_conditional || fatal_error_occurred || state->disable_printing) return;
+            if (evaluating_conditional || (fatal_error_occurred && !continue_on_error) || state->disable_printing) return;
 
             try {
                 crash_context_guard::set_operation("macro expanded");
@@ -321,15 +325,17 @@ namespace ppstep {
                 crash_context_guard::exit_macro_expansion();
                 crash_context_guard::set_operation("token processing");
             } catch (...) {
-                fatal_error_occurred = true;
-                state->disable_printing = true;
+                if (!continue_on_error) {
+                    fatal_error_occurred = true;
+                    state->disable_printing = true;
+                }
                 crash_context_guard::exit_macro_expansion();
             }
         }
 
         template <typename ContextT>
         void rescanned_macro(ContextT& ctx, ContainerT const& result) {
-            if (evaluating_conditional || fatal_error_occurred || state->disable_printing) return;
+            if (evaluating_conditional || (fatal_error_occurred && !continue_on_error) || state->disable_printing) return;
 
             try {
                 crash_context_guard::set_operation("rescanning macro");
@@ -347,14 +353,16 @@ namespace ppstep {
 
                 state->rescanning.pop_back();
             } catch (...) {
-                fatal_error_occurred = true;
-                state->disable_printing = true;
+                if (!continue_on_error) {
+                    fatal_error_occurred = true;
+                    state->disable_printing = true;
+                }
             }
         }
         
         template <typename ContextT>
         bool found_directive(ContextT const& ctx, TokenT const& directive) {
-            if (fatal_error_occurred || state->disable_printing) return false;
+            if ((fatal_error_occurred && !continue_on_error) || state->disable_printing) return false;
             
             auto directive_id = boost::wave::token_id(directive);
             switch (directive_id) {
@@ -373,7 +381,7 @@ namespace ppstep {
         
         template <typename ContextT>
         bool evaluated_conditional_expression(ContextT const& ctx, TokenT const& directive, ContainerT const& expression, bool expression_value) {
-            if (fatal_error_occurred || state->disable_printing) return false;
+            if ((fatal_error_occurred && !continue_on_error) || state->disable_printing) return false;
             
             evaluating_conditional = false;
             return false;
@@ -394,7 +402,7 @@ namespace ppstep {
         bool found_unknown_directive(ContextT const& ctx, 
                                     ContainerT2 const& line, 
                                     ContainerT2& pending) {
-            if (fatal_error_occurred || state->disable_printing) return false;
+            if ((fatal_error_occurred && !continue_on_error) || state->disable_printing) return false;
             
             if (!line.empty()) {
                 auto it = line.begin();
@@ -441,7 +449,7 @@ namespace ppstep {
         template <typename ContextT>
         void lexed_token(ContextT& ctx, TokenT const& result) {
             if (should_skip_token(result)) return;
-            if (fatal_error_occurred || state->disable_printing) return;
+            if ((fatal_error_occurred && !continue_on_error) || state->disable_printing) return;
 
             try {
                 if (!debug) {
@@ -638,10 +646,16 @@ namespace ppstep {
                 return false;
             }
 
-            state->disable_printing = true;
-            fatal_error_occurred = true;
+            // Always dump the error to log
             dump_error_to_log(ctx, e);
 
+            // In continue-on-error mode, don't set fatal_error_occurred or disable_printing
+            if (!continue_on_error) {
+                state->disable_printing = true;
+                fatal_error_occurred = true;
+            }
+
+            // Always return true to let the exception propagate so we can catch it in main
             return true;
         }
 
@@ -661,7 +675,7 @@ namespace ppstep {
         void complete(ContextT& ctx) {
             if (debug) return;
             
-            if (state->disable_printing) {
+            if (state->disable_printing && !continue_on_error) {
                 std::cerr << "\n⚠️  Preprocessing stopped due to error - output may be incomplete" << std::endl;
                 return;
             }
@@ -672,6 +686,7 @@ namespace ppstep {
         server_state<ContainerT>* state;
         client<TokenT, ContainerT>* sink;
         bool debug;
+        bool continue_on_error;
 
         unsigned int conditional_nesting;
         bool evaluating_conditional;
