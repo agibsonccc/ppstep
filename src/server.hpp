@@ -12,6 +12,7 @@
 
 #include "server_fwd.hpp"
 #include "client.hpp"
+#include "crash_handler.hpp"
 
 namespace ppstep {
     template <class ContainerT>
@@ -71,6 +72,23 @@ namespace ppstep {
             if (evaluating_conditional || fatal_error_occurred || state->disable_printing) return false;
 
             try {
+                // Update crash context - entering macro expansion
+                crash_context_guard::set_operation("expanding function-like macro");
+                
+                // Store macro name for crash handler
+                static thread_local char macro_name_buffer[256];
+                try {
+                    auto val = macrocall.get_value();
+                    size_t len = std::min(val.size(), sizeof(macro_name_buffer) - 1);
+                    std::memcpy(macro_name_buffer, val.c_str(), len);
+                    macro_name_buffer[len] = '\0';
+                    crash_context_guard::set_macro(macro_name_buffer);
+                } catch (...) {
+                    crash_context_guard::set_macro("<corrupted_macro_name>");
+                }
+                
+                crash_context_guard::enter_macro_expansion();
+                
                 auto sanitized_arguments = std::vector<ContainerT>();
                 for (auto const& arg_container : arguments) {
                     sanitized_arguments.push_back(sanitize(arg_container));
@@ -106,6 +124,7 @@ namespace ppstep {
             } catch (...) {
                 fatal_error_occurred = true;
                 state->disable_printing = true;
+                crash_context_guard::exit_macro_expansion();
             }
 
             return false;
@@ -118,6 +137,23 @@ namespace ppstep {
             if (evaluating_conditional || fatal_error_occurred || state->disable_printing) return false;
             
             try {
+                // Update crash context - entering macro expansion
+                crash_context_guard::set_operation("expanding object-like macro");
+                
+                // Store macro name for crash handler
+                static thread_local char macro_name_buffer[256];
+                try {
+                    auto val = macrocall.get_value();
+                    size_t len = std::min(val.size(), sizeof(macro_name_buffer) - 1);
+                    std::memcpy(macro_name_buffer, val.c_str(), len);
+                    macro_name_buffer[len] = '\0';
+                    crash_context_guard::set_macro(macro_name_buffer);
+                } catch (...) {
+                    crash_context_guard::set_macro("<corrupted_macro_name>");
+                }
+                
+                crash_context_guard::enter_macro_expansion();
+                
                 if (!debug) {
                     sink->on_expand_object(ctx, macrocall);
                 } else {
@@ -129,6 +165,7 @@ namespace ppstep {
             } catch (...) {
                 fatal_error_occurred = true;
                 state->disable_printing = true;
+                crash_context_guard::exit_macro_expansion();
             }
             
             return false;
@@ -139,6 +176,8 @@ namespace ppstep {
             if (evaluating_conditional || fatal_error_occurred || state->disable_printing) return;
 
             try {
+                crash_context_guard::set_operation("macro expanded");
+                
                 auto const& initial = *(state->expanding.rbegin());
                 
                 if (!debug) {
@@ -152,9 +191,14 @@ namespace ppstep {
 
                 state->rescanning.push_back({initial, result});
                 state->expanding.pop_back();
+                
+                // Exit macro expansion context
+                crash_context_guard::exit_macro_expansion();
+                crash_context_guard::set_operation("token processing");
             } catch (...) {
                 fatal_error_occurred = true;
                 state->disable_printing = true;
+                crash_context_guard::exit_macro_expansion();
             }
         }
 
@@ -163,6 +207,8 @@ namespace ppstep {
             if (evaluating_conditional || fatal_error_occurred || state->disable_printing) return;
 
             try {
+                crash_context_guard::set_operation("rescanning macro");
+                
                 auto const& [cause, initial] = *(state->rescanning.rbegin());
 
                 if (!debug) {

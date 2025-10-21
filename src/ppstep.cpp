@@ -15,6 +15,7 @@
 
 #include "client.hpp"
 #include "server.hpp"
+#include "crash_handler.hpp"
 
 
 namespace po = boost::program_options;
@@ -73,11 +74,19 @@ bool parse_args(int argc, char const** argv, po::variables_map& vm) {
 }
 
 int main(int argc, char const** argv) {
+    // Install crash handlers FIRST before anything else
+    ppstep::install_crash_handlers();
+    
     po::variables_map args;
     if (!parse_args(argc, argv, args))
         return 1;
 
     char const* input_file = args["input-file"].as<std::string>().c_str();
+    
+    // Set initial context for crash handler
+    ppstep::crash_context_guard::set_file(input_file, 0, 0);
+    ppstep::crash_context_guard::set_operation("initialization");
+    
     auto instring = read_entire_file(std::ifstream(input_file));
 
     auto server_state = ppstep::server_state<token_sequence_type>();
@@ -117,37 +126,73 @@ int main(int argc, char const** argv) {
     }
 
     try {
+        ppstep::crash_context_guard::set_operation("starting preprocessing");
         server.start(ctx);
+        
+        ppstep::crash_context_guard::set_operation("token iteration");
         
         auto first = ctx.begin();
         auto last = ctx.end();
         
         while (first != last) {
+            // Update crash context with current position
+            auto pos = ctx.get_main_pos();
+            ppstep::crash_context_guard::set_file(
+                pos.get_file().c_str(),
+                pos.get_line(),
+                pos.get_column()
+            );
+            
             const auto& token = *first;
+            
+            // Update token context (be careful - token might be corrupted)
+            try {
+                if (token.is_valid()) {
+                    auto val = token.get_value();
+                    if (!val.empty()) {
+                        // Store token string (limit length for safety)
+                        static thread_local char token_buffer[256];
+                        size_t len = std::min(val.size(), sizeof(token_buffer) - 1);
+                        std::memcpy(token_buffer, val.c_str(), len);
+                        token_buffer[len] = '\0';
+                        ppstep::crash_context_guard::set_token(token_buffer);
+                    }
+                }
+            } catch (...) {
+                // Token is corrupted, don't update context
+                ppstep::crash_context_guard::set_token("<corrupted_token>");
+            }
+            
             server.lexed_token(ctx, token);
             ++first;
         }
         
+        ppstep::crash_context_guard::set_operation("completing preprocessing");
         server.complete(ctx);
         
     } catch (ppstep::session_terminate const&) {
         // User quit - normal exit
+        ppstep::crash_context_guard::clear();
         return 0;
         
     } catch (boost::wave::cpp_exception const& e) {
         // Wave exception - already logged by our hook
         // Stop gracefully to avoid segfault
         std::cerr << "\n⚠️  Stopping preprocessing due to error (processed what we could)" << std::endl;
+        ppstep::crash_context_guard::clear();
         return 0;
         
     } catch (std::exception const& e) {
         std::cerr << "\n🔴 Unexpected error: " << e.what() << std::endl;
+        ppstep::crash_context_guard::clear();
         return 1;
         
     } catch (...) {
         std::cerr << "\n🔴 Unknown error" << std::endl;
+        ppstep::crash_context_guard::clear();
         return 1;
     }
 
+    ppstep::crash_context_guard::clear();
     return 0;
 }
