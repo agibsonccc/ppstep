@@ -79,13 +79,11 @@ int main(int argc, char const** argv) {
         return 1;
 
     char const* input_file = args["input-file"].as<std::string>().c_str();
-    
     auto instring = read_entire_file(std::ifstream(input_file));
 
     auto server_state = ppstep::server_state<token_sequence_type>();
     auto client = ppstep::client<token_type, token_sequence_type>(server_state);
     bool continue_on_error = args.count("continue-on-error") > 0;
-
     auto server = ppstep::server<token_type, token_sequence_type>(server_state, client, args.count("debug"), continue_on_error);
     context_type ctx(instring.begin(), instring.end(), input_file, server);
 
@@ -120,66 +118,22 @@ int main(int argc, char const** argv) {
         }
     }
 
-    int error_count = 0;
-
+    auto first = ctx.begin();
+    auto last = ctx.end();
     try {
         server.start(ctx);
-        
-        auto first = ctx.begin();
-        auto last = ctx.end();
-        
         while (first != last) {
-            try {
-                server.lexed_token(ctx, *first);
-                ++first;
-            } catch (boost::wave::cpp_exception const& e) {
-                error_count++;
-                
-                if (continue_on_error) {
-                    std::cerr << "\n⚠️  Error #" << error_count << " (continuing due to --continue-on-error)" << std::endl;
-                    
-                    try {
-                        ++first;
-                    } catch (...) {
-                        std::cerr << "⚠️  Cannot advance past error, stopping iteration" << std::endl;
-                        break;
-                    }
-                } else {
-                    throw;
-                }
-            }
+            server.lexed_token(ctx, *first);
+            ++first;
         }
-        
         server.complete(ctx);
-        
+    } catch (ppstep::session_terminate const& e) {
+        ;
     } catch (boost::wave::cpp_exception const& e) {
-        if (!continue_on_error) {
-            std::cerr << "\n⚠️  Stopping preprocessing due to error (processed what we could)" << std::endl;
-        }
-        
-        if (error_count > 0) {
-            std::cerr << "\n📊 Statistics:" << std::endl;
-            std::cerr << "   Errors encountered: " << error_count << std::endl;
-            std::cerr << "💾 Check ppstep_error_*.log files for detailed error context" << std::endl;
-        }
-        return 0;
-        
-    } catch (std::exception const& e) {
-        std::cerr << "\n🔴 Unexpected error: " << e.what() << std::endl;
-        return 1;
-        
-    } catch (...) {
-        std::cerr << "\n🔴 Unknown error" << std::endl;
-        return 1;
+        std::cerr << e.what() << ": " << e.description() << std::endl;
+    } catch (boost::wave::cpplexer::lexing_exception const& e) {
+        std::cerr << e.what() << ": " << e.description() << std::endl;
     }
-    
-    if (error_count > 0) {
-        std::cerr << "\n📊 Statistics:" << std::endl;
-        std::cerr << "   Errors encountered: " << error_count << std::endl;
-        std::cerr << "💾 Check ppstep_error_*.log files for detailed error context" << std::endl;
-    } else {
-        std::cerr << "\n✅ Preprocessing completed successfully" << std::endl;
-    }
-    
+
     return 0;
 }
