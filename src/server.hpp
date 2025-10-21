@@ -87,6 +87,84 @@ namespace ppstep {
                     crash_context_guard::set_macro("<corrupted_macro_name>");
                 }
                 
+                // Write detailed diagnostic BEFORE entering (in case we crash)
+                std::ofstream diagnostic("ppstep_macro_diagnostic.log", std::ios::app);
+                if (diagnostic.is_open()) {
+                    auto now = std::chrono::system_clock::now();
+                    auto time_t = std::chrono::system_clock::to_time_t(now);
+                    diagnostic << "\n==================== MACRO EXPANSION ====================\n";
+                    diagnostic << "Time: " << std::put_time(std::localtime(&time_t), "%Y-%m-%d %H:%M:%S") << "\n";
+
+                    try {
+                        auto pos = ctx.get_main_pos();
+                        diagnostic << "Location: " << std::string(pos.get_file().begin(), pos.get_file().end())
+                                 << ":" << pos.get_line() << ":" << pos.get_column() << "\n";
+                    } catch (...) {}
+
+                    diagnostic << "\nMACRO NAME: " << macro_name_buffer << "\n";
+
+                    diagnostic << "\nFORMAL PARAMETERS (" << formal_args.size() << "):\n";
+                    for (size_t i = 0; i < formal_args.size(); ++i) {
+                        try {
+                            diagnostic << "  [" << i << "] " << formal_args[i].get_value().c_str() << "\n";
+                        } catch (...) {
+                            diagnostic << "  [" << i << "] <CORRUPTED>\n";
+                        }
+                    }
+
+                    diagnostic << "\nMACRO DEFINITION:\n  ";
+                    try {
+                        for (auto const& token : definition) {
+                            try {
+                                diagnostic << token.get_value().c_str() << " ";
+                            } catch (...) {
+                                diagnostic << "<CORRUPTED> ";
+                            }
+                        }
+                    } catch (...) {
+                        diagnostic << "<CORRUPTED_CONTAINER>";
+                    }
+                    diagnostic << "\n";
+
+                    diagnostic << "\nACTUAL ARGUMENTS (" << arguments.size() << "):\n";
+                    for (size_t i = 0; i < arguments.size(); ++i) {
+                        diagnostic << "  [" << i << "] ";
+                        try {
+                            for (auto const& token : arguments[i]) {
+                                try {
+                                    diagnostic << token.get_value().c_str() << " ";
+                                } catch (...) {
+                                    diagnostic << "<CORRUPTED> ";
+                                }
+                            }
+                        } catch (...) {
+                            diagnostic << "<CORRUPTED_CONTAINER>";
+                        }
+                        diagnostic << "\n";
+                    }
+
+                    diagnostic << "\nFULL CALL SEQUENCE:\n  ";
+                    try {
+                        diagnostic << macrocall.get_value().c_str();
+                        auto it = seqstart;
+                        while (it != seqend) {
+                            try {
+                                diagnostic << it->get_value().c_str();
+                            } catch (...) {
+                                diagnostic << "<CORRUPTED>";
+                            }
+                            ++it;
+                        }
+                    } catch (...) {
+                        diagnostic << "<SEQUENCE_CORRUPTED>";
+                    }
+                    diagnostic << "\n";
+
+                    diagnostic << "=========================================================\n";
+                    diagnostic.flush();
+                    diagnostic.close();
+                }
+
                 crash_context_guard::enter_macro_expansion();
                 
                 auto sanitized_arguments = std::vector<ContainerT>();
