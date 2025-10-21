@@ -5,6 +5,7 @@
 #include <iostream>
 #include <list>
 #include <vector>
+#include <set>
 #include <csignal>
 
 #include <boost/wave.hpp>
@@ -53,6 +54,7 @@ bool parse_args(int argc, char const** argv, po::variables_map& vm) {
             "specify a macro to undefine")
         ("debug", "enable debug tracing")
         ("continue-on-error", "continue preprocessing after errors and collect all errors")
+        ("block-crashing-macros", "automatically block macros that would crash Wave")
         ("input-file", po::value<std::string>()->required(), "input file");
 
     po::positional_options_description p;
@@ -75,10 +77,6 @@ bool parse_args(int argc, char const** argv, po::variables_map& vm) {
     }
 }
 
-// Global flag for signal handler
-static volatile sig_atomic_t continue_after_signal = 0;
-static volatile sig_atomic_t segfault_count = 0;
-
 int main(int argc, char const** argv) {
     // Install crash handlers FIRST before anything else
     ppstep::install_crash_handlers();
@@ -98,7 +96,13 @@ int main(int argc, char const** argv) {
     auto server_state = ppstep::server_state<token_sequence_type>();
     auto client = ppstep::client<token_type, token_sequence_type>(server_state);
     bool continue_on_error = args.count("continue-on-error") > 0;
-    auto server = ppstep::server<token_type, token_sequence_type>(server_state, client, args.count("debug"), continue_on_error);
+    bool block_crashing = args.count("block-crashing-macros") > 0;
+    
+    if (block_crashing) {
+        std::cerr << "🛡️  Crash protection enabled - will block problematic macro expansions" << std::endl;
+    }
+    
+    auto server = ppstep::server<token_type, token_sequence_type>(server_state, client, args.count("debug"), continue_on_error, block_crashing);
     context_type ctx(instring.begin(), instring.end(), input_file, server);
 
     static_assert(std::is_same_v<token_sequence_type, typename context_type::token_sequence_type>,
@@ -312,6 +316,9 @@ int main(int argc, char const** argv) {
     } else {
         std::cerr << "\n✅ Preprocessing completed successfully" << std::endl;
     }
+    
+    std::cerr << "📄 Full expansion trace: ppstep_expansion_trace.log" << std::endl;
+    std::cerr << "📄 Blocked expansions: ppstep_blocked_expansions.log" << std::endl;
     
     return 0;
 }
