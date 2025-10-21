@@ -5,8 +5,6 @@
 #include <iostream>
 #include <list>
 #include <vector>
-#include <set>
-#include <csignal>
 
 #include <boost/wave.hpp>
 #include <boost/wave/cpplexer/cpp_lex_token.hpp>
@@ -17,7 +15,6 @@
 
 #include "client.hpp"
 #include "server.hpp"
-#include "crash_handler.hpp"
 
 
 namespace po = boost::program_options;
@@ -77,18 +74,11 @@ bool parse_args(int argc, char const** argv, po::variables_map& vm) {
 }
 
 int main(int argc, char const** argv) {
-    // Install crash handlers FIRST before anything else
-    ppstep::install_crash_handlers();
-    
     po::variables_map args;
     if (!parse_args(argc, argv, args))
         return 1;
 
     char const* input_file = args["input-file"].as<std::string>().c_str();
-    
-    // Set initial context for crash handler
-    ppstep::crash_context_guard::set_file(input_file, 0, 0);
-    ppstep::crash_context_guard::set_operation("initialization");
     
     auto instring = read_entire_file(std::ifstream(input_file));
 
@@ -131,126 +121,23 @@ int main(int argc, char const** argv) {
     }
 
     int error_count = 0;
-    int skipped_tokens = 0;
 
     try {
-        ppstep::crash_context_guard::set_operation("starting preprocessing");
         server.start(ctx);
-        
-        ppstep::crash_context_guard::set_operation("token iteration");
         
         auto first = ctx.begin();
         auto last = ctx.end();
         
         while (first != last) {
-            bool token_processed = false;
-            
             try {
-                // Update crash context with current position
-                auto pos = ctx.get_main_pos();
-                ppstep::crash_context_guard::set_file(
-                    pos.get_file().c_str(),
-                    pos.get_line(),
-                    pos.get_column()
-                );
-            } catch (...) {
-                // If we can't even get position, skip this token
-                if (continue_on_error) {
-                    std::cerr << "⚠️  Cannot get position, skipping token" << std::endl;
-                    skipped_tokens++;
-                    try { ++first; } catch (...) { break; }
-                    continue;
-                } else {
-                    throw;
-                }
-            }
-            
-            try {
-                // VERY carefully try to access the token
-                try {
-                    const auto& token = *first;
-                    
-                    // Update token context (be careful - token might be corrupted)
-                    try {
-                        if (token.is_valid()) {
-                            auto val = token.get_value();
-                            if (!val.empty()) {
-                                // Store token string (limit length for safety)
-                                static thread_local char token_buffer[256];
-                                size_t len = std::min(val.size(), sizeof(token_buffer) - 1);
-                                std::memcpy(token_buffer, val.c_str(), len);
-                                token_buffer[len] = '\0';
-                                ppstep::crash_context_guard::set_token(token_buffer);
-                            }
-                        }
-                    } catch (...) {
-                        // Token is corrupted, don't update context
-                        ppstep::crash_context_guard::set_token("<corrupted_token>");
-                    }
-                    
-                    // Try to process the token
-                    try {
-                        server.lexed_token(ctx, token);
-                        token_processed = true;
-                    } catch (std::exception const& e) {
-                        if (continue_on_error) {
-                            std::cerr << "⚠️  Error processing token: " << e.what() << std::endl;
-                            skipped_tokens++;
-                        } else {
-                            throw;
-                        }
-                    } catch (...) {
-                        if (continue_on_error) {
-                            std::cerr << "⚠️  Unknown error processing token" << std::endl;
-                            skipped_tokens++;
-                        } else {
-                            throw;
-                        }
-                    }
-                    
-                } catch (std::exception const& e) {
-                    if (continue_on_error) {
-                        std::cerr << "⚠️  Error dereferencing token: " << e.what() << std::endl;
-                        skipped_tokens++;
-                    } else {
-                        throw;
-                    }
-                } catch (...) {
-                    if (continue_on_error) {
-                        std::cerr << "⚠️  Unknown error accessing token" << std::endl;
-                        skipped_tokens++;
-                    } else {
-                        throw;
-                    }
-                }
-                
-                // Try to advance iterator
-                try {
-                    ++first;
-                } catch (std::exception const& e) {
-                    if (continue_on_error) {
-                        std::cerr << "⚠️  Error advancing iterator: " << e.what() << ", stopping iteration" << std::endl;
-                        break;
-                    } else {
-                        throw;
-                    }
-                } catch (...) {
-                    if (continue_on_error) {
-                        std::cerr << "⚠️  Unknown error advancing iterator, stopping iteration" << std::endl;
-                        break;
-                    } else {
-                        throw;
-                    }
-                }
-                
+                server.lexed_token(ctx, *first);
+                ++first;
             } catch (boost::wave::cpp_exception const& e) {
                 error_count++;
                 
                 if (continue_on_error) {
-                    // Error already logged by server's throw_exception hook
                     std::cerr << "\n⚠️  Error #" << error_count << " (continuing due to --continue-on-error)" << std::endl;
                     
-                    // Try to advance past the error
                     try {
                         ++first;
                     } catch (...) {
@@ -258,60 +145,41 @@ int main(int argc, char const** argv) {
                         break;
                     }
                 } else {
-                    // Stop on first error
                     throw;
                 }
             }
         }
         
-        ppstep::crash_context_guard::set_operation("completing preprocessing");
         server.complete(ctx);
         
-    } catch (ppstep::session_terminate const&) {
-        // User quit - normal exit
-        ppstep::crash_context_guard::clear();
-        return 0;
-        
     } catch (boost::wave::cpp_exception const& e) {
-        // Wave exception - already logged by our hook
         if (!continue_on_error) {
             std::cerr << "\n⚠️  Stopping preprocessing due to error (processed what we could)" << std::endl;
         }
-        ppstep::crash_context_guard::clear();
         
-        if (error_count > 0 || skipped_tokens > 0) {
+        if (error_count > 0) {
             std::cerr << "\n📊 Statistics:" << std::endl;
             std::cerr << "   Errors encountered: " << error_count << std::endl;
-            std::cerr << "   Tokens skipped: " << skipped_tokens << std::endl;
             std::cerr << "💾 Check ppstep_error_*.log files for detailed error context" << std::endl;
         }
         return 0;
         
     } catch (std::exception const& e) {
         std::cerr << "\n🔴 Unexpected error: " << e.what() << std::endl;
-        ppstep::crash_context_guard::clear();
         return 1;
         
     } catch (...) {
         std::cerr << "\n🔴 Unknown error" << std::endl;
-        ppstep::crash_context_guard::clear();
         return 1;
     }
-
-    ppstep::crash_context_guard::clear();
     
-    if (error_count > 0 || skipped_tokens > 0) {
+    if (error_count > 0) {
         std::cerr << "\n📊 Statistics:" << std::endl;
         std::cerr << "   Errors encountered: " << error_count << std::endl;
-        std::cerr << "   Tokens skipped: " << skipped_tokens << std::endl;
-        if (error_count > 0) {
-            std::cerr << "💾 Check ppstep_error_*.log files for detailed error context" << std::endl;
-        }
+        std::cerr << "💾 Check ppstep_error_*.log files for detailed error context" << std::endl;
     } else {
         std::cerr << "\n✅ Preprocessing completed successfully" << std::endl;
     }
     
-    std::cerr << "📄 Full expansion trace: ppstep_expansion_trace.log" << std::endl;
-
     return 0;
 }
