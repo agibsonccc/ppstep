@@ -34,30 +34,47 @@ namespace ppstep {
         ~server() {}
 
         inline bool should_skip_token(TokenT const& token) {
-            return IS_CATEGORY(token, boost::wave::WhiteSpaceTokenType)
-                    || IS_CATEGORY(token, boost::wave::EOFTokenType)
-                    || (boost::wave::token_id(token) == boost::wave::T_PLACEMARKER)
-                    || !token.is_valid();
+            try {
+                return IS_CATEGORY(token, boost::wave::WhiteSpaceTokenType)
+                        || IS_CATEGORY(token, boost::wave::EOFTokenType)
+                        || (boost::wave::token_id(token) == boost::wave::T_PLACEMARKER)
+                        || !token.is_valid();
+            } catch (...) {
+                // If we can't even check the token, skip it
+                return true;
+            }
         }
 
         inline ContainerT sanitize(ContainerT const& tokens) {
             auto acc = ContainerT();
-            for (auto const& token : tokens) {
-                if (should_skip_token(token)) continue;
-                acc.push_back(token);
+            try {
+                for (auto const& token : tokens) {
+                    if (should_skip_token(token)) continue;
+                    acc.push_back(token);
+                }
+            } catch (...) {
+                // Return what we have so far
             }
             return acc;
         }
         
         inline ContainerT preserve_whitespace(ContainerT const& tokens) {
             auto acc = ContainerT();
-            for (auto const& token : tokens) {
-                if (IS_CATEGORY(token, boost::wave::EOFTokenType)
-                    || (boost::wave::token_id(token) == boost::wave::T_PLACEMARKER)
-                    || !token.is_valid()) {
-                    continue;
+            try {
+                for (auto const& token : tokens) {
+                    try {
+                        if (IS_CATEGORY(token, boost::wave::EOFTokenType)
+                            || (boost::wave::token_id(token) == boost::wave::T_PLACEMARKER)
+                            || !token.is_valid()) {
+                            continue;
+                        }
+                        acc.push_back(token);
+                    } catch (...) {
+                        continue;
+                    }
                 }
-                acc.push_back(token);
+            } catch (...) {
+                // Return what we have so far
             }
             return acc;
         }
@@ -85,52 +102,38 @@ namespace ppstep {
                     crash_context_guard::set_macro(macro_name_buffer);
                 } catch (...) {
                     // If corrupted, just leave it unset (nullptr)
+                    macro_name_buffer[0] = '\0';
                 }
                 
                 // Write detailed diagnostic BEFORE entering (in case we crash)
-                std::ofstream diagnostic("ppstep_macro_diagnostic.log", std::ios::app);
-                if (diagnostic.is_open()) {
-                    auto now = std::chrono::system_clock::now();
-                    auto time_t = std::chrono::system_clock::to_time_t(now);
-                    diagnostic << "\n==================== MACRO EXPANSION ====================\n";
-                    diagnostic << "Time: " << std::put_time(std::localtime(&time_t), "%Y-%m-%d %H:%M:%S") << "\n";
+                try {
+                    std::ofstream diagnostic("ppstep_macro_diagnostic.log", std::ios::app);
+                    if (diagnostic.is_open()) {
+                        auto now = std::chrono::system_clock::now();
+                        auto time_t = std::chrono::system_clock::to_time_t(now);
+                        diagnostic << "\n==================== MACRO EXPANSION ====================\n";
+                        diagnostic << "Time: " << std::put_time(std::localtime(&time_t), "%Y-%m-%d %H:%M:%S") << "\n";
 
-                    try {
-                        auto pos = ctx.get_main_pos();
-                        diagnostic << "Location: " << std::string(pos.get_file().begin(), pos.get_file().end())
-                                 << ":" << pos.get_line() << ":" << pos.get_column() << "\n";
-                    } catch (...) {}
-
-                    diagnostic << "\nMACRO NAME: " << macro_name_buffer << "\n";
-
-                    diagnostic << "\nFORMAL PARAMETERS (" << formal_args.size() << "):\n";
-                    for (size_t i = 0; i < formal_args.size(); ++i) {
                         try {
-                            diagnostic << "  [" << i << "] " << formal_args[i].get_value().c_str() << "\n";
-                        } catch (...) {
-                            diagnostic << "  [" << i << "] <CORRUPTED>\n";
-                        }
-                    }
+                            auto pos = ctx.get_main_pos();
+                            diagnostic << "Location: " << std::string(pos.get_file().begin(), pos.get_file().end())
+                                     << ":" << pos.get_line() << ":" << pos.get_column() << "\n";
+                        } catch (...) {}
 
-                    diagnostic << "\nMACRO DEFINITION:\n  ";
-                    try {
-                        for (auto const& token : definition) {
+                        diagnostic << "\nMACRO NAME: " << macro_name_buffer << "\n";
+
+                        diagnostic << "\nFORMAL PARAMETERS (" << formal_args.size() << "):\n";
+                        for (size_t i = 0; i < formal_args.size(); ++i) {
                             try {
-                                diagnostic << token.get_value().c_str() << " ";
+                                diagnostic << "  [" << i << "] " << formal_args[i].get_value().c_str() << "\n";
                             } catch (...) {
-                                diagnostic << "<CORRUPTED> ";
+                                diagnostic << "  [" << i << "] <CORRUPTED>\n";
                             }
                         }
-                    } catch (...) {
-                        diagnostic << "<CORRUPTED_CONTAINER>";
-                    }
-                    diagnostic << "\n";
 
-                    diagnostic << "\nACTUAL ARGUMENTS (" << arguments.size() << "):\n";
-                    for (size_t i = 0; i < arguments.size(); ++i) {
-                        diagnostic << "  [" << i << "] ";
+                        diagnostic << "\nMACRO DEFINITION:\n  ";
                         try {
-                            for (auto const& token : arguments[i]) {
+                            for (auto const& token : definition) {
                                 try {
                                     diagnostic << token.get_value().c_str() << " ";
                                 } catch (...) {
@@ -141,54 +144,52 @@ namespace ppstep {
                             diagnostic << "<CORRUPTED_CONTAINER>";
                         }
                         diagnostic << "\n";
-                    }
 
-                    diagnostic << "\nFULL CALL SEQUENCE:\n  ";
-                    try {
-                        diagnostic << macrocall.get_value().c_str();
-                        auto it = seqstart;
-                        while (it != seqend) {
+                        diagnostic << "\nACTUAL ARGUMENTS (" << arguments.size() << "):\n";
+                        for (size_t i = 0; i < arguments.size(); ++i) {
+                            diagnostic << "  [" << i << "] ";
                             try {
-                                diagnostic << it->get_value().c_str();
+                                for (auto const& token : arguments[i]) {
+                                    try {
+                                        diagnostic << token.get_value().c_str() << " ";
+                                    } catch (...) {
+                                        diagnostic << "<CORRUPTED> ";
+                                    }
+                                }
                             } catch (...) {
-                                diagnostic << "<CORRUPTED>";
+                                diagnostic << "<CORRUPTED_CONTAINER>";
                             }
-                            ++it;
+                            diagnostic << "\n";
                         }
-                    } catch (...) {
-                        diagnostic << "<SEQUENCE_CORRUPTED>";
-                    }
-                    diagnostic << "\n";
 
-                    diagnostic << "=========================================================\n";
-                    diagnostic.flush();
-                    diagnostic.close();
-                }
-
-                // Log the substitution attempt
-                std::ofstream subst_log("ppstep_substitution.log", std::ios::app);
-                if (subst_log.is_open()) {
-                    subst_log << "\n=== ATTEMPTING SUBSTITUTION ===\n";
-                    subst_log << "Macro: " << macro_name_buffer << "\n";
-                    subst_log << "About to substitute " << formal_args.size() << " arguments\n";
-
-                    // Show what each formal parameter will be replaced with
-                    for (size_t i = 0; i < formal_args.size() && i < arguments.size(); ++i) {
-                        subst_log << "Replace " << formal_args[i].get_value().c_str() << " with: ";
-                        for (auto const& token : arguments[i]) {
-                            subst_log << token.get_value().c_str() << " ";
+                        diagnostic << "\nFULL CALL SEQUENCE:\n  ";
+                        try {
+                            diagnostic << macrocall.get_value().c_str();
+                            auto it = seqstart;
+                            while (it != seqend) {
+                                try {
+                                    diagnostic << it->get_value().c_str();
+                                } catch (...) {
+                                    diagnostic << "<CORRUPTED>";
+                                }
+                                ++it;
+                            }
+                        } catch (...) {
+                            diagnostic << "<SEQUENCE_CORRUPTED>";
                         }
-                        subst_log << "\n";
-                    }
+                        diagnostic << "\n";
 
-                    subst_log << "Beginning expansion now...\n";
-                    subst_log.flush();
-                    subst_log.close();
+                        diagnostic << "=========================================================\n";
+                        diagnostic.flush();
+                        diagnostic.close();
+                    }
+                } catch (...) {
+                    // Diagnostic logging failed, continue anyway
                 }
 
                 // Determine if this is an INNER/NEXT expansion based on macro name
                 const char* expansion_type = "ENTRY";
-                if (macro_name_buffer) {
+                if (macro_name_buffer[0] != '\0') {
                     if (strstr(macro_name_buffer, "_INNER") || strstr(macro_name_buffer, "_inner")) {
                         expansion_type = "INNER";
                     } else if (strstr(macro_name_buffer, "_NEXT") || strstr(macro_name_buffer, "_next")) {
@@ -202,37 +203,71 @@ namespace ppstep {
                 crash_context_guard::enter_macro_expansion(macro_name_buffer, expansion_type);
                 
                 auto sanitized_arguments = std::vector<ContainerT>();
-                for (auto const& arg_container : arguments) {
-                    sanitized_arguments.push_back(sanitize(arg_container));
+                try {
+                    for (auto const& arg_container : arguments) {
+                        sanitized_arguments.push_back(sanitize(arg_container));
+                    }
+                } catch (...) {
+                    // If we can't sanitize arguments, continue with empty
                 }
                 
                 auto preserved_arguments = std::vector<ContainerT>();
-                for (auto const& arg_container : arguments) {
-                    preserved_arguments.push_back(preserve_whitespace(arg_container));
+                try {
+                    for (auto const& arg_container : arguments) {
+                        preserved_arguments.push_back(preserve_whitespace(arg_container));
+                    }
+                } catch (...) {
+                    // If we can't preserve arguments, continue with empty
                 }
 
-                auto full_call = ContainerT(seqstart, seqend);
-                {
+                auto full_call = ContainerT();
+                auto full_call_preserved = ContainerT();
+                
+                try {
+                    full_call = ContainerT(seqstart, seqend);
                     full_call.push_front(macrocall);
                     full_call.push_back(*seqend);
                     full_call = sanitize(full_call);
+                } catch (...) {
+                    // If we can't build full call, just use macrocall
+                    try {
+                        full_call = ContainerT{macrocall};
+                    } catch (...) {
+                        // Can't even create a container with one token
+                        crash_context_guard::exit_macro_expansion();
+                        return false;
+                    }
                 }
                 
-                auto full_call_preserved = ContainerT(seqstart, seqend);
-                {
+                try {
+                    full_call_preserved = ContainerT(seqstart, seqend);
                     full_call_preserved.push_front(macrocall);
                     full_call_preserved.push_back(*seqend);
                     full_call_preserved = preserve_whitespace(full_call_preserved);
+                } catch (...) {
+                    // Use full_call as fallback
+                    full_call_preserved = full_call;
                 }
                 
                 if (!debug) {
-                    sink->on_expand_function(ctx, macrodef, sanitized_arguments, full_call, preserved_arguments, full_call_preserved);
+                    try {
+                        sink->on_expand_function(ctx, macrodef, sanitized_arguments, full_call, preserved_arguments, full_call_preserved);
+                    } catch (...) {
+                        // Sink failed, but don't crash
+                    }
                 } else {
                     std::cout << "F: ";
                     print_token_container(std::cout, full_call) << std::endl;
                 }
 
-                state->expanding.push_back(full_call);
+                try {
+                    state->expanding.push_back(full_call);
+                } catch (...) {
+                    // Can't push to stack
+                    crash_context_guard::exit_macro_expansion();
+                    return false;
+                }
+                
             } catch (...) {
                 if (!continue_on_error) {
                     fatal_error_occurred = true;
@@ -264,11 +299,12 @@ namespace ppstep {
                     crash_context_guard::set_macro(macro_name_buffer);
                 } catch (...) {
                     // If corrupted, just leave it unset
+                    macro_name_buffer[0] = '\0';
                 }
                 
                 // Determine if this is an INNER/NEXT expansion based on macro name
                 const char* expansion_type = "ENTRY";
-                if (macro_name_buffer) {
+                if (macro_name_buffer[0] != '\0') {
                     if (strstr(macro_name_buffer, "_INNER") || strstr(macro_name_buffer, "_inner")) {
                         expansion_type = "INNER";
                     } else if (strstr(macro_name_buffer, "_NEXT") || strstr(macro_name_buffer, "_next")) {
@@ -282,13 +318,24 @@ namespace ppstep {
                 crash_context_guard::enter_macro_expansion(macro_name_buffer, expansion_type);
                 
                 if (!debug) {
-                    sink->on_expand_object(ctx, macrocall);
+                    try {
+                        sink->on_expand_object(ctx, macrocall);
+                    } catch (...) {
+                        // Sink failed, but don't crash
+                    }
                 } else {
                     std::cout << "O: ";
                     print_token(std::cout, macrocall) << std::endl;
                 }
 
-                state->expanding.push_back({macrocall});
+                try {
+                    state->expanding.push_back({macrocall});
+                } catch (...) {
+                    // Can't push to stack
+                    crash_context_guard::exit_macro_expansion();
+                    return false;
+                }
+                
             } catch (...) {
                 if (!continue_on_error) {
                     fatal_error_occurred = true;
@@ -307,23 +354,39 @@ namespace ppstep {
             try {
                 crash_context_guard::set_operation("macro expanded");
                 
+                // GUARD: Check if expanding stack is empty
+                if (state->expanding.empty()) {
+                    std::cerr << "⚠️  Warning: expanded_macro called with empty expanding stack" << std::endl;
+                    return;
+                }
+                
                 auto const& initial = *(state->expanding.rbegin());
                 
                 if (!debug) {
-                     sink->on_expanded(ctx, sanitize(initial), sanitize(result), 
-                                      preserve_whitespace(initial), preserve_whitespace(result));
+                    try {
+                        sink->on_expanded(ctx, sanitize(initial), sanitize(result), 
+                                         preserve_whitespace(initial), preserve_whitespace(result));
+                    } catch (...) {
+                        // Sink failed, but don't crash
+                    }
                 } else {
                     std::cout << "E: ";
                     print_token_container(std::cout, sanitize(initial)) << " -> ";
                     print_token_container(std::cout, sanitize(result)) << std::endl;
                 }
 
-                state->rescanning.push_back({initial, result});
+                try {
+                    state->rescanning.push_back({initial, result});
+                } catch (...) {
+                    // Can't push to rescanning stack
+                }
+                
                 state->expanding.pop_back();
                 
                 // Exit macro expansion context
                 crash_context_guard::exit_macro_expansion();
                 crash_context_guard::set_operation("token processing");
+                
             } catch (...) {
                 if (!continue_on_error) {
                     fatal_error_occurred = true;
@@ -340,11 +403,21 @@ namespace ppstep {
             try {
                 crash_context_guard::set_operation("rescanning macro");
                 
+                // GUARD: Check if rescanning stack is empty
+                if (state->rescanning.empty()) {
+                    std::cerr << "⚠️  Warning: rescanned_macro called with empty rescanning stack" << std::endl;
+                    return;
+                }
+                
                 auto const& [cause, initial] = *(state->rescanning.rbegin());
 
                 if (!debug) {
-                    sink->on_rescanned(ctx, sanitize(cause), sanitize(initial), sanitize(result),
-                                      preserve_whitespace(cause), preserve_whitespace(initial), preserve_whitespace(result));
+                    try {
+                        sink->on_rescanned(ctx, sanitize(cause), sanitize(initial), sanitize(result),
+                                          preserve_whitespace(cause), preserve_whitespace(initial), preserve_whitespace(result));
+                    } catch (...) {
+                        // Sink failed, but don't crash
+                    }
                 } else {
                     std::cout << "R: ";
                     print_token_container(std::cout, sanitize(initial)) << " -> ";
@@ -352,6 +425,7 @@ namespace ppstep {
                 }
 
                 state->rescanning.pop_back();
+                
             } catch (...) {
                 if (!continue_on_error) {
                     fatal_error_occurred = true;
@@ -364,17 +438,21 @@ namespace ppstep {
         bool found_directive(ContextT const& ctx, TokenT const& directive) {
             if ((fatal_error_occurred && !continue_on_error) || state->disable_printing) return false;
             
-            auto directive_id = boost::wave::token_id(directive);
-            switch (directive_id) {
-                case boost::wave::T_PP_IF:
-                case boost::wave::T_PP_ELIF:
-                case boost::wave::T_PP_IFDEF:
-                case boost::wave::T_PP_IFNDEF: {
-                    evaluating_conditional = true;
-                    break;
+            try {
+                auto directive_id = boost::wave::token_id(directive);
+                switch (directive_id) {
+                    case boost::wave::T_PP_IF:
+                    case boost::wave::T_PP_ELIF:
+                    case boost::wave::T_PP_IFDEF:
+                    case boost::wave::T_PP_IFNDEF: {
+                        evaluating_conditional = true;
+                        break;
+                    }
+                    default:
+                        break;
                 }
-                default:
-                    break;
+            } catch (...) {
+                // Can't check directive, just continue
             }
             return false;
         }
@@ -404,43 +482,47 @@ namespace ppstep {
                                     ContainerT2& pending) {
             if ((fatal_error_occurred && !continue_on_error) || state->disable_printing) return false;
             
-            if (!line.empty()) {
-                auto it = line.begin();
-                std::string first_token;
-                
-                while (it != line.end()) {
-                    if (!IS_CATEGORY(*it, boost::wave::WhiteSpaceTokenType)) {
-                        first_token = (*it).get_value().c_str();
-                        break;
-                    }
-                    ++it;
-                }
-                
-                if (first_token == "pragma" || first_token == "#pragma") {
-                    ++it;
+            try {
+                if (!line.empty()) {
+                    auto it = line.begin();
+                    std::string first_token;
+                    
                     while (it != line.end()) {
                         if (!IS_CATEGORY(*it, boost::wave::WhiteSpaceTokenType)) {
-                            std::string pragma_type = (*it).get_value().c_str();
-                            if (pragma_type == "GCC" || pragma_type == "gcc") {
-                                pending.clear();
-                                if (debug) {
-                                    std::cout << "Skipping GCC pragma" << std::endl;
-                                }
-                                return true;
-                            }
+                            first_token = (*it).get_value().c_str();
                             break;
                         }
                         ++it;
                     }
-                }
-                
-                if (first_token == "warning" || first_token == "error") {
-                    pending.clear();
-                    if (debug) {
-                        std::cout << "Skipping compiler-specific directive: " << first_token << std::endl;
+                    
+                    if (first_token == "pragma" || first_token == "#pragma") {
+                        ++it;
+                        while (it != line.end()) {
+                            if (!IS_CATEGORY(*it, boost::wave::WhiteSpaceTokenType)) {
+                                std::string pragma_type = (*it).get_value().c_str();
+                                if (pragma_type == "GCC" || pragma_type == "gcc") {
+                                    pending.clear();
+                                    if (debug) {
+                                        std::cout << "Skipping GCC pragma" << std::endl;
+                                    }
+                                    return true;
+                                }
+                                break;
+                            }
+                            ++it;
+                        }
                     }
-                    return true;
+                    
+                    if (first_token == "warning" || first_token == "error") {
+                        pending.clear();
+                        if (debug) {
+                            std::cout << "Skipping compiler-specific directive: " << first_token << std::endl;
+                        }
+                        return true;
+                    }
                 }
+            } catch (...) {
+                // Can't process directive, just continue
             }
             
             return false;
@@ -453,7 +535,11 @@ namespace ppstep {
 
             try {
                 if (!debug) {
-                    sink->on_lexed(ctx, result);
+                    try {
+                        sink->on_lexed(ctx, result);
+                    } catch (...) {
+                        // Sink failed, but don't crash
+                    }
                 } else {
                     std::cout << "L: ";
                     print_token(std::cout, result) << std::endl;
@@ -647,7 +733,11 @@ namespace ppstep {
             }
 
             // Always dump the error to log
-            dump_error_to_log(ctx, e);
+            try {
+                dump_error_to_log(ctx, e);
+            } catch (...) {
+                std::cerr << "⚠️  Error while dumping error log" << std::endl;
+            }
 
             // In continue-on-error mode, don't set fatal_error_occurred or disable_printing
             if (!continue_on_error) {
@@ -668,7 +758,11 @@ namespace ppstep {
 
             if (debug) return;
 
-            sink->on_start(ctx);
+            try {
+                sink->on_start(ctx);
+            } catch (...) {
+                // Sink failed, but don't crash
+            }
         }
 
         template <typename ContextT>
@@ -680,7 +774,11 @@ namespace ppstep {
                 return;
             }
 
-            sink->on_complete(ctx);
+            try {
+                sink->on_complete(ctx);
+            } catch (...) {
+                // Sink failed, but don't crash
+            }
         }
 
         server_state<ContainerT>* state;
