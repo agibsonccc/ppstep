@@ -20,14 +20,15 @@ namespace ppstep {
 
         std::vector<ContainerT> expanding;
         std::vector<std::pair<ContainerT, ContainerT>> rescanning;
-        bool disable_printing;  // Set to true after errors to prevent crashes
+        bool disable_printing;
     };
 
     template <typename TokenT, typename ContainerT>
     struct server : boost::wave::context_policies::eat_whitespace<TokenT> {
         using base_type = boost::wave::context_policies::eat_whitespace<TokenT>;
 
-        server(server_state<ContainerT>& state, client<TokenT, ContainerT>& sink, bool debug = false) : state(&state), sink(&sink), debug(debug), evaluating_conditional(false), fatal_error_occurred(false), main_input_file()  {}
+        server(server_state<ContainerT>& state, client<TokenT, ContainerT>& sink, bool debug = false) 
+            : state(&state), sink(&sink), debug(debug), evaluating_conditional(false), fatal_error_occurred(false), main_input_file()  {}
 
         ~server() {}
 
@@ -47,17 +48,14 @@ namespace ppstep {
             return acc;
         }
         
-        // New method that preserves whitespace for recording
         inline ContainerT preserve_whitespace(ContainerT const& tokens) {
             auto acc = ContainerT();
             for (auto const& token : tokens) {
-                // Only skip EOF, placemarkers, and invalid tokens
                 if (IS_CATEGORY(token, boost::wave::EOFTokenType)
                     || (boost::wave::token_id(token) == boost::wave::T_PLACEMARKER)
                     || !token.is_valid()) {
                     continue;
                 }
-                // Keep whitespace tokens for recording
                 acc.push_back(token);
             }
             return acc;
@@ -70,7 +68,6 @@ namespace ppstep {
                 ContainerT const& definition,
                 TokenT const& macrocall, std::vector<ContainerT> const& arguments,
                 IteratorT const& seqstart, IteratorT const& seqend) {
-            // CRITICAL: Don't record anything after error - tokens may be corrupted
             if (evaluating_conditional || fatal_error_occurred || state->disable_printing) return false;
 
             try {
@@ -79,7 +76,6 @@ namespace ppstep {
                     sanitized_arguments.push_back(sanitize(arg_container));
                 }
                 
-                // Keep original with whitespace for recording
                 auto preserved_arguments = std::vector<ContainerT>();
                 for (auto const& arg_container : arguments) {
                     preserved_arguments.push_back(preserve_whitespace(arg_container));
@@ -92,7 +88,6 @@ namespace ppstep {
                     full_call = sanitize(full_call);
                 }
                 
-                // Create preserved version for recording
                 auto full_call_preserved = ContainerT(seqstart, seqend);
                 {
                     full_call_preserved.push_front(macrocall);
@@ -109,7 +104,6 @@ namespace ppstep {
 
                 state->expanding.push_back(full_call);
             } catch (...) {
-                // Any exception in hook processing means corrupted state
                 fatal_error_occurred = true;
                 state->disable_printing = true;
             }
@@ -121,7 +115,6 @@ namespace ppstep {
         bool expanding_object_like_macro(
                 ContextT& ctx, TokenT const& macrodef,
                 ContainerT const& definition, TokenT const& macrocall) {
-            // CRITICAL: Don't record anything after error - tokens may be corrupted
             if (evaluating_conditional || fatal_error_occurred || state->disable_printing) return false;
             
             try {
@@ -143,14 +136,12 @@ namespace ppstep {
 
         template <typename ContextT>
         void expanded_macro(ContextT& ctx, ContainerT const& result) {
-            // CRITICAL: Don't record anything after error - tokens may be corrupted
             if (evaluating_conditional || fatal_error_occurred || state->disable_printing) return;
 
             try {
                 auto const& initial = *(state->expanding.rbegin());
                 
                 if (!debug) {
-                     // Pass both sanitized and preserved versions
                      sink->on_expanded(ctx, sanitize(initial), sanitize(result), 
                                       preserve_whitespace(initial), preserve_whitespace(result));
                 } else {
@@ -169,14 +160,12 @@ namespace ppstep {
 
         template <typename ContextT>
         void rescanned_macro(ContextT& ctx, ContainerT const& result) {
-            // CRITICAL: Don't record anything after error - tokens may be corrupted
             if (evaluating_conditional || fatal_error_occurred || state->disable_printing) return;
 
             try {
                 auto const& [cause, initial] = *(state->rescanning.rbegin());
 
                 if (!debug) {
-                    // Pass both sanitized and preserved versions
                     sink->on_rescanned(ctx, sanitize(cause), sanitize(initial), sanitize(result),
                                       preserve_whitespace(cause), preserve_whitespace(initial), preserve_whitespace(result));
                 } else {
@@ -230,19 +219,16 @@ namespace ppstep {
             
         }
 
-        // Hook to handle unknown directives (like #pragma GCC)
         template <typename ContextT, typename ContainerT2>
         bool found_unknown_directive(ContextT const& ctx, 
                                     ContainerT2 const& line, 
                                     ContainerT2& pending) {
             if (fatal_error_occurred || state->disable_printing) return false;
             
-            // Check if this is a GCC-specific pragma or other problematic directive
             if (!line.empty()) {
                 auto it = line.begin();
                 std::string first_token;
                 
-                // Skip whitespace and get the first meaningful token
                 while (it != line.end()) {
                     if (!IS_CATEGORY(*it, boost::wave::WhiteSpaceTokenType)) {
                         first_token = (*it).get_value().c_str();
@@ -251,20 +237,17 @@ namespace ppstep {
                     ++it;
                 }
                 
-                // Handle GCC-specific pragmas
                 if (first_token == "pragma" || first_token == "#pragma") {
-                    // Look for the next token to see if it's GCC-related
                     ++it;
                     while (it != line.end()) {
                         if (!IS_CATEGORY(*it, boost::wave::WhiteSpaceTokenType)) {
                             std::string pragma_type = (*it).get_value().c_str();
                             if (pragma_type == "GCC" || pragma_type == "gcc") {
-                                // Skip this pragma entirely
                                 pending.clear();
                                 if (debug) {
                                     std::cout << "Skipping GCC pragma" << std::endl;
                                 }
-                                return true; // We've handled it, don't process further
+                                return true;
                             }
                             break;
                         }
@@ -272,9 +255,7 @@ namespace ppstep {
                     }
                 }
                 
-                // Handle other problematic directives
                 if (first_token == "warning" || first_token == "error") {
-                    // These might be GCC-specific warning/error directives
                     pending.clear();
                     if (debug) {
                         std::cout << "Skipping compiler-specific directive: " << first_token << std::endl;
@@ -283,14 +264,12 @@ namespace ppstep {
                 }
             }
             
-            return false; // Let Wave handle it normally
+            return false;
         }
 
         template <typename ContextT>
         void lexed_token(ContextT& ctx, TokenT const& result) {
             if (should_skip_token(result)) return;
-            
-            // Don't process hooks if fatal error, but don't crash either
             if (fatal_error_occurred || state->disable_printing) return;
 
             try {
@@ -301,14 +280,11 @@ namespace ppstep {
                     print_token(std::cout, result) << std::endl;
                 }
             } catch (...) {
-                // Ignore errors during error recovery
             }
         }
         
-        // Dump full error context to log file
         template <typename ContextT, typename ExceptionT>
         void dump_error_to_log(ContextT& ctx, ExceptionT const& e) {
-            // Get timestamp for log filename
             auto now = std::chrono::system_clock::now();
             auto time_t = std::chrono::system_clock::to_time_t(now);
             std::stringstream log_filename;
@@ -320,14 +296,12 @@ namespace ppstep {
                 return;
             }
             
-            // Write header
             log << "========================================" << std::endl;
             log << "PPSTEP PREPROCESSING ERROR LOG" << std::endl;
             log << "========================================" << std::endl;
             log << "Timestamp: " << std::put_time(std::localtime(&time_t), "%Y-%m-%d %H:%M:%S") << std::endl;
             log << std::endl;
             
-            // Extract and write error information
             std::string error_msg = "<unknown>";
             std::string file = "<unknown>";
             int line = 0;
@@ -359,7 +333,6 @@ namespace ppstep {
             
             try { severity = e.get_severity(); } catch (...) {}
             
-            // Write error details
             log << "ERROR DETAILS:" << std::endl;
             log << "  Severity: ";
             switch (severity) {
@@ -379,7 +352,6 @@ namespace ppstep {
             log << "  Column: " << column << std::endl;
             log << std::endl;
             
-            // Try to get context information
             log << "CONTEXT:" << std::endl;
             try {
                 auto pos = ctx.get_main_pos();
@@ -391,47 +363,68 @@ namespace ppstep {
             }
             log << std::endl;
             
-            // Write state information
             log << "PREPROCESSING STATE:" << std::endl;
             log << "  Expanding stack depth: " << state->expanding.size() << std::endl;
             log << "  Rescanning stack depth: " << state->rescanning.size() << std::endl;
             log << "  Evaluating conditional: " << (evaluating_conditional ? "yes" : "no") << std::endl;
             log << std::endl;
 
-            // Dump the actual macro expansion stack
             if (!state->expanding.empty()) {
-                log << "MACRO EXPANSION STACK (what was being expanded):" << std::endl;
+                log << "MACRO EXPANSION STACK:" << std::endl;
                 int level = 0;
                 for (auto it = state->expanding.rbegin(); it != state->expanding.rend(); ++it, ++level) {
                     log << "  Level " << level << ": ";
-                    for (auto const& token : *it) {
-                        log << token.get_value().c_str();
+                    try {
+                        for (auto const& token : *it) {
+                            try {
+                                log << token.get_value().c_str();
+                            } catch (...) {
+                                log << "<CORRUPTED>";
+                            }
+                        }
+                    } catch (...) {
+                        log << "<CORRUPTED_CONTAINER>";
                     }
                     log << std::endl;
                 }
                 log << std::endl;
             }
 
-            // Dump the rescanning stack
             if (!state->rescanning.empty()) {
                 log << "RESCANNING STACK:" << std::endl;
                 int level = 0;
                 for (auto it = state->rescanning.rbegin(); it != state->rescanning.rend(); ++it, ++level) {
                     log << "  Level " << level << " - Cause: ";
-                    for (auto const& token : it->first) {
-                        log << token.get_value().c_str();
+                    try {
+                        for (auto const& token : it->first) {
+                            try {
+                                log << token.get_value().c_str();
+                            } catch (...) {
+                                log << "<CORRUPTED>";
+                            }
+                        }
+                    } catch (...) {
+                        log << "<CORRUPTED_CONTAINER>";
                     }
                     log << std::endl;
+                    
                     log << "  Level " << level << " - Result: ";
-                    for (auto const& token : it->second) {
-                        log << token.get_value().c_str();
+                    try {
+                        for (auto const& token : it->second) {
+                            try {
+                                log << token.get_value().c_str();
+                            } catch (...) {
+                                log << "<CORRUPTED>";
+                            }
+                        }
+                    } catch (...) {
+                        log << "<CORRUPTED_CONTAINER>";
                     }
                     log << std::endl;
                 }
                 log << std::endl;
             }
             
-            // Write exception type info
             log << "EXCEPTION INFO:" << std::endl;
             log << "  Type: " << typeid(e).name() << std::endl;
             try {
@@ -447,11 +440,9 @@ namespace ppstep {
             
             log.close();
             
-            // Print log file location to stderr
             std::cerr << "Full error context written to: " << log_filename.str() << std::endl;
         }
         
-        // Handle ALL exceptions - warnings ignored, errors logged and thrown
         template <typename ContextT, typename ExceptionT>
         bool throw_exception(ContextT& ctx, ExceptionT const& e) {
             int severity = boost::wave::util::severity_fatal;
@@ -462,40 +453,29 @@ namespace ppstep {
                 severity = boost::wave::util::severity_fatal;
             }
 
-            // Warnings: silently suppress
             if (severity == boost::wave::util::severity_remark ||
                 severity == boost::wave::util::severity_warning) {
                 return false;
             }
 
-            // ERRORS: Check if this is in the EXACT input file
             std::string error_file;
-
             try {
                 error_file = e.file_name();
             } catch (...) {}
 
-            // If error is NOT in the main input file, skip it
             if (main_input_file.empty() || error_file != main_input_file) {
-                return false;  // Suppress error in included files
+                return false;
             }
 
-            // Error IS in the main input file - log and throw
             state->disable_printing = true;
             fatal_error_occurred = true;
             dump_error_to_log(ctx, e);
 
-            // Return TRUE = throw to ppstep.cpp which will exit
-            return true;
-            }
-
-            // Return TRUE = throw to ppstep.cpp which will exit
             return true;
         }
 
         template <typename ContextT>
         void start(ContextT& ctx) {
-            // Store the main input file for error filtering
             try {
                 auto pos = ctx.get_main_pos();
                 main_input_file = std::string(pos.get_file().begin(), pos.get_file().end());
@@ -510,7 +490,6 @@ namespace ppstep {
         void complete(ContextT& ctx) {
             if (debug) return;
             
-            // CRITICAL: Don't try to print event history if tokens are corrupted
             if (state->disable_printing) {
                 std::cerr << "\n⚠️  Preprocessing stopped due to error - output may be incomplete" << std::endl;
                 return;
