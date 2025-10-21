@@ -178,54 +178,6 @@ namespace ppstep {
             
         }
 
-        template <typename ContextT, typename ContainerT2>
-        bool found_unknown_directive(ContextT const& ctx, 
-                                    ContainerT2 const& line, 
-                                    ContainerT2& pending) {
-            if ((fatal_error_occurred && !continue_on_error) || state->disable_printing) return false;
-            
-            if (!line.empty()) {
-                auto it = line.begin();
-                std::string first_token;
-                
-                while (it != line.end()) {
-                    if (!IS_CATEGORY(*it, boost::wave::WhiteSpaceTokenType)) {
-                        first_token = (*it).get_value().c_str();
-                        break;
-                    }
-                    ++it;
-                }
-                
-                if (first_token == "pragma" || first_token == "#pragma") {
-                    ++it;
-                    while (it != line.end()) {
-                        if (!IS_CATEGORY(*it, boost::wave::WhiteSpaceTokenType)) {
-                            std::string pragma_type = (*it).get_value().c_str();
-                            if (pragma_type == "GCC" || pragma_type == "gcc") {
-                                pending.clear();
-                                if (debug) {
-                                    std::cout << "Skipping GCC pragma" << std::endl;
-                                }
-                                return true;
-                            }
-                            break;
-                        }
-                        ++it;
-                    }
-                }
-                
-                if (first_token == "warning" || first_token == "error") {
-                    pending.clear();
-                    if (debug) {
-                        std::cout << "Skipping compiler-specific directive: " << first_token << std::endl;
-                    }
-                    return true;
-                }
-            }
-            
-            return false;
-        }
-
         template <typename ContextT>
         void lexed_token(ContextT& ctx, TokenT const& result) {
             if (should_skip_token(result)) return;
