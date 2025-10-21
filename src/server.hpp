@@ -105,99 +105,7 @@ namespace ppstep {
                 IteratorT const& seqstart, IteratorT const& seqend) {
             if (evaluating_conditional || (fatal_error_occurred && !continue_on_error) || state->disable_printing) return false;
 
-            // BLOCK DANGEROUS EXPANSIONS
-            if (block_crashing_macros) {
-                std::string macro_name;
-                try {
-                    macro_name = macrocall.get_value().c_str();
-                } catch (...) {
-                    macro_name = "<corrupted>";
-                }
-
-                // Check for known crash-prone patterns
-                bool should_block = false;
-                std::string block_reason;
-
-                // Pattern 1: Too deep nesting
-                if (g_expansion_depth > 20) {
-                    should_block = true;
-                    block_reason = "Excessive nesting depth";
-                }
-
-                // Pattern 2: Argument count mismatch - Wave will crash
-                if (formal_args.size() != arguments.size()) {
-                    should_block = true;
-                    block_reason = "Argument count mismatch";
-                }
-
-                // Pattern 3: Validate all tokens in arguments are accessible
-                if (!should_block) {
-                    try {
-                        for (size_t i = 0; i < arguments.size(); ++i) {
-                            for (auto const& token : arguments[i]) {
-                                // Try to access token - if corrupted, will throw
-                                auto val = token.get_value();
-                                auto id = boost::wave::token_id(token);
-                            }
-                        }
-                    } catch (...) {
-                        should_block = true;
-                        block_reason = "Corrupted tokens in arguments";
-                    }
-                }
-
-                // Pattern 4: Validate definition tokens are accessible
-                if (!should_block) {
-                    try {
-                        for (auto const& token : definition) {
-                            auto val = token.get_value();
-                            auto id = boost::wave::token_id(token);
-                        }
-                    } catch (...) {
-                        should_block = true;
-                        block_reason = "Corrupted tokens in definition";
-                    }
-                }
-
-                // Pattern 5: Validate formal parameter tokens
-                if (!should_block) {
-                    try {
-                        for (auto const& param : formal_args) {
-                            auto val = param.get_value();
-                        }
-                    } catch (...) {
-                        should_block = true;
-                        block_reason = "Corrupted formal parameters";
-                    }
-                }
-
-                // Pattern 6: Validate iterators are valid
-                if (!should_block) {
-                    try {
-                        if (seqstart != seqend) {
-                            auto it = seqstart;
-                            while (it != seqend) {
-                                auto val = it->get_value();
-                                ++it;
-                            }
-                        }
-                    } catch (...) {
-                        should_block = true;
-                        block_reason = "Invalid call sequence iterators";
-                    }
-                }
-
-                if (should_block) {
-                    if (blocked_expansions_log.is_open()) {
-                        blocked_expansions_log << "🛡️  BLOCKED: " << macro_name << "\n";
-                        blocked_expansions_log << "   Reason: " << block_reason << "\n";
-                        blocked_expansions_log << "   Depth: " << g_expansion_depth << "\n";
-                        try {
-                            auto pos = ctx.get_main_pos();
-                            blocked_expansions_log << "   Location: "
-                                                  << std::string(pos.get_file().begin(), pos.get_file().end())
-                                                  << ":" << pos.get_line() << ":" << pos.get_column() << "\n";
-                        } catch (...) {}
+            try {
                         blocked_expansions_log << "\n";
                         blocked_expansions_log.flush();
                     }
@@ -923,7 +831,6 @@ namespace ppstep {
         client<TokenT, ContainerT>* sink;
         bool debug;
         bool continue_on_error;
-        std::ofstream blocked_expansions_log;
 
         unsigned int conditional_nesting;
         bool evaluating_conditional;
