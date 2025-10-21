@@ -486,6 +486,8 @@ namespace ppstep {
         template <class ContextT>
         void on_expanded(ContextT& ctx, ContainerT const& initial, ContainerT const& result,
                         ContainerT const& preserved_initial, ContainerT const& preserved_result) {
+            if (initial.empty()) return;
+
             // Record expansion with normalized whitespace
             if (recording_active) {
                 record_file << "[EXPANDED]" << std::endl;
@@ -519,6 +521,8 @@ namespace ppstep {
         // Keep original version for backward compatibility
         template <class ContextT>
         void on_expanded(ContextT& ctx, ContainerT const& initial, ContainerT const& result) {
+            if (initial.empty()) return;
+
             // Fallback for when preserved versions aren't available
             if (recording_active) {
                 record_file << "[EXPANDED]" << std::endl;
