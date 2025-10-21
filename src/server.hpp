@@ -33,7 +33,7 @@ namespace ppstep {
         using base_type = boost::wave::context_policies::eat_whitespace<TokenT>;
 
         server(server_state<ContainerT>& state, client<TokenT, ContainerT>& sink, bool debug = false, bool continue_on_error = false)
-            : state(&state), sink(&sink), debug(debug), continue_on_error(continue_on_error), evaluating_conditional(false), fatal_error_occurred(false), main_input_file(), blocked_expansions_log("ppstep_blocked_expansions.log", std::ios::out | std::ios::trunc)  {
+            : state(&state), sink(&sink), debug(debug), continue_on_error(continue_on_error), evaluating_conditional(false), fatal_error_occurred(false), main_input_file()  {
             // Initialize trace file
             if (g_expansion_trace.is_open()) {
                 auto now = std::chrono::system_clock::now();
@@ -104,15 +104,6 @@ namespace ppstep {
                 TokenT const& macrocall, std::vector<ContainerT> const& arguments,
                 IteratorT const& seqstart, IteratorT const& seqend) {
             if (evaluating_conditional || (fatal_error_occurred && !continue_on_error) || state->disable_printing) return false;
-
-            try {
-                        blocked_expansions_log << "\n";
-                        blocked_expansions_log.flush();
-                    }
-                    std::cerr << "🛡️  BLOCKED expansion of " << macro_name << " (" << block_reason << ")\n";
-                    return true; // BLOCK THE EXPANSION - Wave won't see it
-                }
-            }
 
             try {
                 crash_context_guard::set_operation("expanding function-like macro");

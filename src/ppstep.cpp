@@ -54,7 +54,6 @@ bool parse_args(int argc, char const** argv, po::variables_map& vm) {
             "specify a macro to undefine")
         ("debug", "enable debug tracing")
         ("continue-on-error", "continue preprocessing after errors and collect all errors")
-        ("block-crashing-macros", "automatically block macros that would crash Wave")
         ("input-file", po::value<std::string>()->required(), "input file");
 
     po::positional_options_description p;
@@ -96,13 +95,8 @@ int main(int argc, char const** argv) {
     auto server_state = ppstep::server_state<token_sequence_type>();
     auto client = ppstep::client<token_type, token_sequence_type>(server_state);
     bool continue_on_error = args.count("continue-on-error") > 0;
-    bool block_crashing = args.count("block-crashing-macros") > 0;
-    
-    if (block_crashing) {
-        std::cerr << "🛡️  Crash protection enabled - will block problematic macro expansions" << std::endl;
-    }
-    
-    auto server = ppstep::server<token_type, token_sequence_type>(server_state, client, args.count("debug"), continue_on_error, block_crashing);
+
+    auto server = ppstep::server<token_type, token_sequence_type>(server_state, client, args.count("debug"), continue_on_error);
     context_type ctx(instring.begin(), instring.end(), input_file, server);
 
     static_assert(std::is_same_v<token_sequence_type, typename context_type::token_sequence_type>,
@@ -318,7 +312,6 @@ int main(int argc, char const** argv) {
     }
     
     std::cerr << "📄 Full expansion trace: ppstep_expansion_trace.log" << std::endl;
-    std::cerr << "📄 Blocked expansions: ppstep_blocked_expansions.log" << std::endl;
-    
+
     return 0;
 }
