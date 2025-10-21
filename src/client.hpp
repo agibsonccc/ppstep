@@ -840,7 +840,7 @@ namespace ppstep {
         std::set<typename TokenT::string_type> expansion_breakpoints;
         std::set<typename TokenT::string_type> expanded_breakpoints;
         stepping_mode mode;
-        std::string target_macro;
+        typename TokenT::string_type target_macro;
         bool target_found;
 
         std::list<offset_container<ContainerT>> token_stack;
