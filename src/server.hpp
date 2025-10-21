@@ -468,19 +468,25 @@ namespace ppstep {
                 return false;
             }
 
-            // ERRORS: Only log if this is in the EXACT input file user passed in
+            // ERRORS: Check if this is in the EXACT input file
             std::string error_file;
 
             try {
                 error_file = e.file_name();
             } catch (...) {}
 
+            // If error is NOT in the main input file, skip it
+            if (main_input_file.empty() || error_file != main_input_file) {
+                return false;  // Suppress error in included files
+            }
+
+            // Error IS in the main input file - log and throw
             state->disable_printing = true;
             fatal_error_occurred = true;
+            dump_error_to_log(ctx, e);
 
-            // ONLY log if error is in the exact main input file
-            if (!main_input_file.empty() && error_file == main_input_file) {
-                dump_error_to_log(ctx, e);
+            // Return TRUE = throw to ppstep.cpp which will exit
+            return true;
             }
 
             // Return TRUE = throw to ppstep.cpp which will exit
