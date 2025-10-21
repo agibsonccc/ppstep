@@ -109,11 +109,29 @@ namespace ppstep {
                 safe_write(STDERR, "\n");
             }
             
-            // Depth info
+            // Expansion chain info
             if (g_crash_context.macro_depth > 0) {
-                safe_write(STDERR, "📊 DEPTH: ");
+                safe_write(STDERR, "\n📊 EXPANSION CHAIN (");
                 safe_write_int(STDERR, g_crash_context.macro_depth);
-                safe_write(STDERR, " levels deep\n");
+                safe_write(STDERR, " levels):\n");
+
+                for (int i = 0; i < g_crash_context.macro_depth && i < crash_context::MAX_CHAIN_DEPTH; ++i) {
+                    safe_write(STDERR, "  [");
+                    safe_write_int(STDERR, i);
+                    safe_write(STDERR, "] ");
+
+                    if (g_crash_context.expansion_types[i]) {
+                        safe_write(STDERR, g_crash_context.expansion_types[i]);
+                        safe_write(STDERR, ": ");
+                    }
+
+                    if (g_crash_context.expansion_chain[i]) {
+                        safe_write(STDERR, g_crash_context.expansion_chain[i]);
+                    } else {
+                        safe_write(STDERR, "<unknown>");
+                    }
+                    safe_write(STDERR, "\n");
+                }
             }
             
 #if defined(__linux__) || defined(__APPLE__)
@@ -155,7 +173,14 @@ namespace ppstep {
                 }
                 
                 if (g_crash_context.macro_depth > 0) {
-                    fprintf(log, "Macro Depth: %d\n", g_crash_context.macro_depth);
+                    fprintf(log, "Macro Depth: %d\n\n", g_crash_context.macro_depth);
+                    fprintf(log, "Expansion Chain:\n");
+                    for (int i = 0; i < g_crash_context.macro_depth && i < crash_context::MAX_CHAIN_DEPTH; ++i) {
+                        fprintf(log, "  [%d] %s: %s\n",
+                                i,
+                                g_crash_context.expansion_types[i] ? g_crash_context.expansion_types[i] : "UNKNOWN",
+                                g_crash_context.expansion_chain[i] ? g_crash_context.expansion_chain[i] : "<unknown>");
+                    }
                 }
                 
 #if defined(__linux__) || defined(__APPLE__)
