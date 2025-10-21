@@ -179,6 +179,8 @@ namespace ppstep {
             : state(&state), 
               cli(client_cli<TokenT, ContainerT>(*this, std::move(prefix))), 
               mode(stepping_mode::FREE), 
+              target_macro(), 
+              target_found(false),
               recording_active(false),
               break_on_error(false),
               error_occurred(false),
@@ -675,6 +677,13 @@ namespace ppstep {
             }
         }
         
+        void set_target(typename TokenT::string_type const& macro) {
+            target_macro = macro;
+            target_found = false;
+            mode = stepping_mode::UNTIL_BREAK;
+            std::cout << "Target set: " << macro << " (running until found)" << std::endl;
+        }
+        
         server_state<ContainerT> const& get_state() {
             return *state;
         }
@@ -776,6 +785,17 @@ namespace ppstep {
         void handle_prompt(ContextT& ctx, TokenT const& token, preprocessing_event_type type) {
             bool do_prompt = false;
 
+            // Check target first
+            if (!target_macro.empty() && !target_found) {
+                if (token.get_value() == target_macro) {
+                    target_found = true;
+                    std::cout << "\n🎯 Target reached: " << target_macro << "\n";
+                    do_prompt = true;
+                } else {
+                    return;  // Skip everything until target
+                }
+            }
+
             // Check for errors first
             if (should_break_on_error()) {
                 do_prompt = true;
@@ -820,6 +840,8 @@ namespace ppstep {
         std::set<typename TokenT::string_type> expansion_breakpoints;
         std::set<typename TokenT::string_type> expanded_breakpoints;
         stepping_mode mode;
+        std::string target_macro;
+        bool target_found;
 
         std::list<offset_container<ContainerT>> token_stack;
         std::deque<historical_event<ContainerT>> token_history;  // Changed to deque for efficient trimming

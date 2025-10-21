@@ -63,6 +63,11 @@ namespace ppstep {
             cl.remove_breakpoint({attr.begin(), attr.end()}, cond);
         }
 
+        template <class Attr>
+        void set_target(Attr const& attr) {
+            cl.set_target({attr.begin(), attr.end()});
+        }
+
         void step_continue() {
             steps_requested = 1;
             cl.set_mode(stepping_mode::UNTIL_BREAK);
@@ -305,6 +310,7 @@ namespace ppstep {
                       | (lit("lex") > +space > anything[PPSTEP_ACTION(remove_breakpoint(attr, preprocessing_event_type::LEXED))])
                       | (lit("l") > +space > anything[PPSTEP_ACTION(remove_breakpoint(attr, preprocessing_event_type::LEXED))])
                 )]
+              | lexeme[(lit("target") | lit("t")) > +space > anything[PPSTEP_ACTION(set_target(attr))]]
               | lexeme[(lit("expand") | lit("e")) > +space > anything[PPSTEP_ACTION(expand_macro(ctx, attr))]]
               | lexeme[lit("#define") > +space > anything[PPSTEP_ACTION(define_macro(ctx, attr))]]
               | lexeme[lit("#undef") > +space > anything[PPSTEP_ACTION(undefine_macro(ctx, attr))]]
