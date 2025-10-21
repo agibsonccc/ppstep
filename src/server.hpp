@@ -230,54 +230,6 @@ namespace ppstep {
                     // If corrupted, just leave it unset
                 }
                 
-                // VALIDATE ALL TOKENS BEFORE PROCESSING - bail if any are corrupted
-                try {
-                    // Check macro call token
-                    if (!macrocall.is_valid()) {
-                        std::cerr << "\n⚠️  CORRUPTED TOKEN: macrocall is invalid - skipping expansion\n";
-                        return false;
-                    }
-                    auto _ = macrocall.get_value(); // Force access to check pointer
-
-                    // Check all argument tokens
-                    for (size_t i = 0; i < arguments.size(); ++i) {
-                        for (auto const& token : arguments[i]) {
-                            if (!token.is_valid()) {
-                                std::cerr << "\n⚠️  CORRUPTED TOKEN in argument " << i << " - skipping expansion\n";
-                                return false;
-                            }
-                            auto _val = token.get_value(); // Force access
-                        }
-                    }
-
-                    // Check sequence tokens
-                    auto it = seqstart;
-                    while (it != seqend) {
-                        if (!it->is_valid()) {
-                            std::cerr << "\n⚠️  CORRUPTED TOKEN in call sequence - skipping expansion\n";
-                            return false;
-                        }
-                        auto _val = it->get_value(); // Force access
-                        ++it;
-                    }
-
-                    // Check definition tokens
-                    for (auto const& token : definition) {
-                        if (!token.is_valid()) {
-                            std::cerr << "\n⚠️  CORRUPTED TOKEN in macro definition - skipping expansion\n";
-                            return false;
-                        }
-                        auto _val = token.get_value(); // Force access
-                    }
-
-                } catch (std::exception const& e) {
-                    std::cerr << "\n⚠️  TOKEN VALIDATION FAILED: " << e.what() << " - skipping expansion\n";
-                    return false;
-                } catch (...) {
-                    std::cerr << "\n⚠️  TOKEN VALIDATION FAILED (unknown error) - skipping expansion\n";
-                    return false;
-                }
-
                 crash_context_guard::enter_macro_expansion();
                 
                 if (!debug) {
