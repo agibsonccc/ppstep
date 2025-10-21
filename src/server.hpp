@@ -468,11 +468,34 @@ namespace ppstep {
                 return false;
             }
 
-            // ERRORS: These corrupt token streams and would crash
-            // Log full context before throwing
+            // ERRORS: Check if this is in the main file being preprocessed
+            std::string error_file;
+            std::string main_file;
+
+            try {
+                error_file = e.file_name();
+            } catch (...) {
+                try {
+                    auto pos = ctx.get_main_pos();
+                    error_file = std::string(pos.get_file().begin(), pos.get_file().end());
+                } catch (...) {}
+            }
+
+            try {
+                auto main_pos = ctx.get_main_pos();
+                main_file = std::string(main_pos.get_file().begin(), main_pos.get_file().end());
+            } catch (...) {}
+
+            // Only log if error is in the main file, not system headers
+            bool is_main_file = !error_file.empty() && !main_file.empty() &&
+                                (error_file == main_file || error_file.find("/usr/") == std::string::npos);
+
             state->disable_printing = true;
             fatal_error_occurred = true;
-            dump_error_to_log(ctx, e);
+
+            if (is_main_file) {
+                dump_error_to_log(ctx, e);
+            }
 
             // Return TRUE = throw to ppstep.cpp which will exit
             return true;
