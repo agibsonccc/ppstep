@@ -22,18 +22,17 @@ namespace ppstep {
 
     template <class Token>
     std::ostream& print_token(std::ostream& os, Token const& token) {
-        // Defensive: check if token is valid before accessing its value
-        if (!token.is_valid()) {
-            os << "<invalid_token>";
-            return os;
-        }
-        
         try {
+            // Even checking validity can crash if token object is fundamentally corrupted
+            if (!token.is_valid()) {
+                os << "<invalid_token>";
+                return os;
+            }
+
             // Try to get the value - may fail if token is corrupted
             auto value = token.get_value();
-            
+
             // Check if we can safely access c_str()
-            // The string object might be corrupt but the pointer might still be readable
             try {
                 const char* str = value.c_str();
                 if (str != nullptr) {
@@ -45,8 +44,9 @@ namespace ppstep {
                 os << "<corrupted_string>";
             }
         } catch (...) {
-            // If get_value() itself throws or accesses bad memory
-            os << "<error_getting_value>";
+            // Catch ANY exception including segfaults wrapped as exceptions
+            // This handles cases where even is_valid() crashes
+            os << "<corrupted_token>";
         }
         
         return os;
