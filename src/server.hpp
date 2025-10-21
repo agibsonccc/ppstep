@@ -165,7 +165,20 @@ namespace ppstep {
                     diagnostic.close();
                 }
 
-                crash_context_guard::enter_macro_expansion();
+                // Determine if this is an INNER/NEXT expansion based on macro name
+                const char* expansion_type = "ENTRY";
+                if (macro_name_buffer) {
+                    if (strstr(macro_name_buffer, "_INNER") || strstr(macro_name_buffer, "_inner")) {
+                        expansion_type = "INNER";
+                    } else if (strstr(macro_name_buffer, "_NEXT") || strstr(macro_name_buffer, "_next")) {
+                        expansion_type = "NEXT";
+                    } else if (strstr(macro_name_buffer, "_IMPL") || strstr(macro_name_buffer, "_impl")) {
+                        expansion_type = "IMPL";
+                    } else if (state->expanding.size() > 0) {
+                        expansion_type = "EXPAND";
+                    }
+                }
+                crash_context_guard::enter_macro_expansion(macro_name_buffer, expansion_type);
                 
                 auto sanitized_arguments = std::vector<ContainerT>();
                 for (auto const& arg_container : arguments) {
@@ -230,7 +243,20 @@ namespace ppstep {
                     // If corrupted, just leave it unset
                 }
                 
-                crash_context_guard::enter_macro_expansion();
+                // Determine if this is an INNER/NEXT expansion based on macro name
+                const char* expansion_type = "ENTRY";
+                if (macro_name_buffer) {
+                    if (strstr(macro_name_buffer, "_INNER") || strstr(macro_name_buffer, "_inner")) {
+                        expansion_type = "INNER";
+                    } else if (strstr(macro_name_buffer, "_NEXT") || strstr(macro_name_buffer, "_next")) {
+                        expansion_type = "NEXT";
+                    } else if (strstr(macro_name_buffer, "_IMPL") || strstr(macro_name_buffer, "_impl")) {
+                        expansion_type = "IMPL";
+                    } else if (state->expanding.size() > 0) {
+                        expansion_type = "EXPAND";
+                    }
+                }
+                crash_context_guard::enter_macro_expansion(macro_name_buffer, expansion_type);
                 
                 if (!debug) {
                     sink->on_expand_object(ctx, macrocall);

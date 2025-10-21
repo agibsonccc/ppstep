@@ -23,9 +23,19 @@ namespace ppstep {
             const char* operation;
             int macro_depth;
             
-            crash_context() : filename(nullptr), line(0), column(0), 
+            // Expansion chain tracking
+            static constexpr int MAX_CHAIN_DEPTH = 32;
+            const char* expansion_chain[MAX_CHAIN_DEPTH];
+            const char* expansion_types[MAX_CHAIN_DEPTH];  // "ENTRY", "INNER", "NEXT", etc.
+
+            crash_context() : filename(nullptr), line(0), column(0),
                             macro_name(nullptr), last_token(nullptr),
-                            operation(nullptr), macro_depth(0) {}
+                            operation(nullptr), macro_depth(0) {
+                for (int i = 0; i < MAX_CHAIN_DEPTH; ++i) {
+                    expansion_chain[i] = nullptr;
+                    expansion_types[i] = nullptr;
+                }
+            }
         };
         
         thread_local crash_context g_crash_context;
@@ -196,10 +206,17 @@ namespace ppstep {
             crash_handler_detail::g_crash_context.macro_name = macro_name;
         }
         
-        static void enter_macro_expansion(const char* macro_name = nullptr) {
+        static void enter_macro_expansion(const char* macro_name = nullptr, const char* expansion_type = "EXPAND") {
             if (macro_name) {
                 crash_handler_detail::g_crash_context.macro_name = macro_name;
             }
+
+            int depth = crash_handler_detail::g_crash_context.macro_depth;
+            if (depth < crash_handler_detail::crash_context::MAX_CHAIN_DEPTH) {
+                crash_handler_detail::g_crash_context.expansion_chain[depth] = macro_name;
+                crash_handler_detail::g_crash_context.expansion_types[depth] = expansion_type;
+            }
+
             crash_handler_detail::g_crash_context.macro_depth++;
         }
         
