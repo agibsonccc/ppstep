@@ -397,6 +397,39 @@ namespace ppstep {
             log << "  Rescanning stack depth: " << state->rescanning.size() << std::endl;
             log << "  Evaluating conditional: " << (evaluating_conditional ? "yes" : "no") << std::endl;
             log << std::endl;
+
+            // Dump the actual macro expansion stack
+            if (!state->expanding.empty()) {
+                log << "MACRO EXPANSION STACK (what was being expanded):" << std::endl;
+                int level = 0;
+                for (auto it = state->expanding.rbegin(); it != state->expanding.rend(); ++it, ++level) {
+                    log << "  Level " << level << ": ";
+                    for (auto const& token : *it) {
+                        log << token.get_value().c_str();
+                    }
+                    log << std::endl;
+                }
+                log << std::endl;
+            }
+
+            // Dump the rescanning stack
+            if (!state->rescanning.empty()) {
+                log << "RESCANNING STACK:" << std::endl;
+                int level = 0;
+                for (auto it = state->rescanning.rbegin(); it != state->rescanning.rend(); ++it, ++level) {
+                    log << "  Level " << level << " - Cause: ";
+                    for (auto const& token : it->first) {
+                        log << token.get_value().c_str();
+                    }
+                    log << std::endl;
+                    log << "  Level " << level << " - Result: ";
+                    for (auto const& token : it->second) {
+                        log << token.get_value().c_str();
+                    }
+                    log << std::endl;
+                }
+                log << std::endl;
+            }
             
             // Write exception type info
             log << "EXCEPTION INFO:" << std::endl;
@@ -418,15 +451,30 @@ namespace ppstep {
             std::cerr << "Full error context written to: " << log_filename.str() << std::endl;
         }
         
-        // Always throw all exceptions to ppstep.cpp - let it decide what to do
+        // Handle ALL exceptions - warnings ignored, errors logged and thrown
         template <typename ContextT, typename ExceptionT>
         bool throw_exception(ContextT& ctx, ExceptionT const& e) {
-            // Set flags to prevent crashes from corrupted state
+            int severity = boost::wave::util::severity_fatal;
+
+            try {
+                severity = e.get_severity();
+            } catch (...) {
+                severity = boost::wave::util::severity_fatal;
+            }
+
+            // Warnings: silently suppress
+            if (severity == boost::wave::util::severity_remark ||
+                severity == boost::wave::util::severity_warning) {
+                return false;
+            }
+
+            // ERRORS: These corrupt token streams and would crash
+            // Log full context before throwing
             state->disable_printing = true;
             fatal_error_occurred = true;
+            dump_error_to_log(ctx, e);
 
-            // Return TRUE = always throw exception to ppstep.cpp
-            // ppstep.cpp will decide whether to log based on severity
+            // Return TRUE = throw to ppstep.cpp which will exit
             return true;
         }
 
