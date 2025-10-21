@@ -84,7 +84,7 @@ namespace ppstep {
                     macro_name_buffer[len] = '\0';
                     crash_context_guard::set_macro(macro_name_buffer);
                 } catch (...) {
-                    crash_context_guard::set_macro("<corrupted_macro_name>");
+                    // If corrupted, just leave it unset (nullptr)
                 }
                 
                 // Write detailed diagnostic BEFORE entering (in case we crash)
