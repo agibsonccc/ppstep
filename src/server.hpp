@@ -165,6 +165,27 @@ namespace ppstep {
                     diagnostic.close();
                 }
 
+                // Log the substitution attempt
+                std::ofstream subst_log("ppstep_substitution.log", std::ios::app);
+                if (subst_log.is_open()) {
+                    subst_log << "\n=== ATTEMPTING SUBSTITUTION ===\n";
+                    subst_log << "Macro: " << macro_name_buffer << "\n";
+                    subst_log << "About to substitute " << formal_args.size() << " arguments\n";
+
+                    // Show what each formal parameter will be replaced with
+                    for (size_t i = 0; i < formal_args.size() && i < arguments.size(); ++i) {
+                        subst_log << "Replace " << formal_args[i].get_value().c_str() << " with: ";
+                        for (auto const& token : arguments[i]) {
+                            subst_log << token.get_value().c_str() << " ";
+                        }
+                        subst_log << "\n";
+                    }
+
+                    subst_log << "Beginning expansion now...\n";
+                    subst_log.flush();
+                    subst_log.close();
+                }
+
                 // Determine if this is an INNER/NEXT expansion based on macro name
                 const char* expansion_type = "ENTRY";
                 if (macro_name_buffer) {
