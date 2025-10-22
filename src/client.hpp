@@ -239,7 +239,7 @@ namespace ppstep {
             
             // Record error if recording is active
             if (recording_active) {
-                record_file << "[ERROR] " << file << ":" << line 
+                record_file << "[PPSTEP-ERROR] " << file << ":" << line 
                            << " - " << error_msg << std::endl;
             }
             
