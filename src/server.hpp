@@ -7,6 +7,8 @@
 #include <chrono>
 #include <iomanip>
 #include <sstream>
+#include <unordered_set>
+#include <algorithm>
 
 #include "server_fwd.hpp"
 #include "client.hpp"
@@ -26,7 +28,7 @@ namespace ppstep {
         using base_type = boost::wave::context_policies::eat_whitespace<TokenT>;
 
         server(server_state<ContainerT>& state, client<TokenT, ContainerT>& sink, bool debug = false, bool continue_on_error = false)
-            : state(&state), sink(&sink), debug(debug), continue_on_error(continue_on_error), evaluating_conditional(false), fatal_error_occurred(false), main_input_file() {}
+            : state(&state), sink(&sink), debug(debug), continue_on_error(continue_on_error), evaluating_conditional(false), fatal_error_occurred(false), main_input_file(), defined_macros() {}
 
         ~server() {}
 
@@ -104,7 +106,42 @@ namespace ppstep {
             }
 
             auto const& initial = *(state->expanding.rbegin());
-            
+
+            // Check for unexpanded macros in the result
+            std::vector<std::string> unexpanded;
+            for (auto const& tok : result) {
+                if (is_unexpanded_macro(tok)) {
+                    std::string name = tok.get_value().c_str();
+                    // Avoid duplicates in the same expansion
+                    if (std::find(unexpanded.begin(), unexpanded.end(), name) == unexpanded.end()) {
+                        unexpanded.push_back(name);
+                    }
+                }
+            }
+
+            // Report unexpanded macros as errors
+            if (!unexpanded.empty() && !debug && sink) {
+                for (auto const& name : unexpanded) {
+                    // Try to get position from the first token in result
+                    std::string file = "<unknown>";
+                    int line = 0;
+
+                    for (auto const& tok : result) {
+                        if (tok.get_value() == name) {
+                            try {
+                                auto pos = tok.get_position();
+                                file = pos.get_file().c_str();
+                                line = pos.get_line();
+                            } catch (...) {}
+                            break;
+                        }
+                    }
+
+                    std::string error_msg = "Unexpanded macro '" + name + "' found in expansion result (likely undefined)";
+                    sink->on_error(error_msg, file, line);
+                }
+            }
+
             if (!debug) {
                 sink->on_expanded(ctx, sanitize(initial), sanitize(result));
             } else {
@@ -170,12 +207,70 @@ namespace ppstep {
         template <typename ContextT, typename ParametersT, typename DefinitionT>
         void defined_macro(ContextT const& ctx, TokenT const& macro_name, bool is_functionlike, ParametersT const& parameters,
                            DefinitionT const& definition, bool is_predefined) {
-            
+            std::string name = macro_name.get_value().c_str();
+            defined_macros.insert(name);
         }
-        
+
         template <typename ContextT>
         void undefined_macro(ContextT const& ctx, TokenT const& macro_name) {
-            
+            std::string name = macro_name.get_value().c_str();
+            defined_macros.erase(name);
+        }
+
+        // Check if a token looks like it should be a macro but isn't defined
+        inline bool is_unexpanded_macro(TokenT const& token) {
+            // Must be an identifier
+            if (!IS_CATEGORY(token, boost::wave::IdentifierTokenType)) {
+                return false;
+            }
+
+            std::string value = token.get_value().c_str();
+
+            // Empty or already defined
+            if (value.empty() || defined_macros.count(value) > 0) {
+                return false;
+            }
+
+            // Check for macro-like naming patterns:
+            // 1. All uppercase with underscores (MACRO_NAME, NOTHING_)
+            // 2. Ends with underscore (common macro pattern)
+            // 3. Contains mostly uppercase letters
+
+            bool has_upper = false;
+            bool has_underscore = false;
+            int upper_count = 0;
+            int alpha_count = 0;
+
+            for (char c : value) {
+                if (std::isupper(c)) {
+                    has_upper = true;
+                    upper_count++;
+                }
+                if (std::isalpha(c)) {
+                    alpha_count++;
+                }
+                if (c == '_') {
+                    has_underscore = true;
+                }
+            }
+
+            // Ends with underscore - strong indicator
+            if (value.back() == '_') {
+                return true;
+            }
+
+            // All uppercase with at least one underscore
+            if (has_underscore && alpha_count > 0 && upper_count == alpha_count) {
+                return true;
+            }
+
+            // Mostly uppercase (>= 80%) with underscores and at least 4 chars
+            if (has_underscore && alpha_count >= 4 &&
+                (float)upper_count / alpha_count >= 0.8f) {
+                return true;
+            }
+
+            return false;
         }
 
         template <typename ContextT>
@@ -335,6 +430,7 @@ namespace ppstep {
         bool evaluating_conditional;
         bool fatal_error_occurred;
         std::string main_input_file;
+        std::unordered_set<std::string> defined_macros;
     };
 }
 
