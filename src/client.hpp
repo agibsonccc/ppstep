@@ -330,11 +330,12 @@ namespace ppstep {
         template <class ContextT>
         void on_lexed(ContextT& ctx, TokenT const& token) {
             // Fast path: skip processing if target is set and not found yet
-            if (!target_macro.empty() && !target_found && token.get_value() != target_macro) {
-                return;
-            }
-            if (!target_macro.empty() && !target_found && token.get_value() == target_macro) {
-                target_found = true;
+            if (!target_macro.empty() && !target_found) {
+                if (token.get_value() == target_macro) {
+                    target_found = true;
+                } else {
+                    return;
+                }
             }
 
             if (token_stack.empty()) {
@@ -380,11 +381,12 @@ namespace ppstep {
                                ContainerT call_tokens, std::vector<ContainerT> const& preserved_arguments, 
                                ContainerT preserved_call_tokens) {
             // Fast path: skip processing if target is set and not found yet
-            if (!target_macro.empty() && !target_found && call.get_value() != target_macro) {
-                return;
-            }
-            if (!target_macro.empty() && !target_found && call.get_value() == target_macro) {
-                target_found = true;
+            if (!target_macro.empty() && !target_found) {
+                if (call.get_value() == target_macro) {
+                    target_found = true;
+                } else {
+                    return;
+                }
             }
 
             // Record function-like macro call if recording with normalized whitespace
@@ -429,11 +431,12 @@ namespace ppstep {
         template <class ContextT>
         void on_expand_function(ContextT& ctx, TokenT const& call, std::vector<ContainerT> const& arguments, ContainerT call_tokens) {
             // Fast path: skip processing if target is set and not found yet
-            if (!target_macro.empty() && !target_found && call.get_value() != target_macro) {
-                return;
-            }
-            if (!target_macro.empty() && !target_found && call.get_value() == target_macro) {
-                target_found = true;
+            if (!target_macro.empty() && !target_found) {
+                if (call.get_value() == target_macro) {
+                    target_found = true;
+                } else {
+                    return;
+                }
             }
 
             // Fallback for when preserved versions aren't available
@@ -480,11 +483,12 @@ namespace ppstep {
         template <class ContextT>
         void on_expand_object(ContextT& ctx, TokenT const& call) {
             // Fast path: skip processing if target is set and not found yet
-            if (!target_macro.empty() && !target_found && call.get_value() != target_macro) {
-                return;
-            }
-            if (!target_macro.empty() && !target_found && call.get_value() == target_macro) {
-                target_found = true;
+            if (!target_macro.empty() && !target_found) {
+                if (call.get_value() == target_macro) {
+                    target_found = true;
+                } else {
+                    return;
+                }
             }
 
             auto call_tokens = ContainerT{call};
@@ -521,11 +525,12 @@ namespace ppstep {
             if (initial.empty()) return;
 
             // Fast path: skip processing if target is set and not found yet
-            if (!target_macro.empty() && !target_found && initial.begin()->get_value() != target_macro) {
-                return;
-            }
-            if (!target_macro.empty() && !target_found && initial.begin()->get_value() == target_macro) {
-                target_found = true;
+            if (!target_macro.empty() && !target_found) {
+                if (initial.begin()->get_value() == target_macro) {
+                    target_found = true;
+                } else {
+                    return;
+                }
             }
 
             // Record expansion with normalized whitespace
@@ -564,11 +569,12 @@ namespace ppstep {
             if (initial.empty()) return;
 
             // Fast path: skip processing if target is set and not found yet
-            if (!target_macro.empty() && !target_found && initial.begin()->get_value() != target_macro) {
-                return;
-            }
-            if (!target_macro.empty() && !target_found && initial.begin()->get_value() == target_macro) {
-                target_found = true;
+            if (!target_macro.empty() && !target_found) {
+                if (initial.begin()->get_value() == target_macro) {
+                    target_found = true;
+                } else {
+                    return;
+                }
             }
 
             // Fallback for when preserved versions aren't available
@@ -611,11 +617,12 @@ namespace ppstep {
             if (initial.empty()) return;
 
             // Fast path: skip processing if target is set and not found yet
-            if (!target_macro.empty() && !target_found && initial.begin()->get_value() != target_macro) {
-                return;
-            }
-            if (!target_macro.empty() && !target_found && initial.begin()->get_value() == target_macro) {
-                target_found = true;
+            if (!target_macro.empty() && !target_found) {
+                if (initial.begin()->get_value() == target_macro) {
+                    target_found = true;
+                } else {
+                    return;
+                }
             }
 
             // Record rescan with normalized whitespace
@@ -657,11 +664,12 @@ namespace ppstep {
             if (initial.empty()) return;
 
             // Fast path: skip processing if target is set and not found yet
-            if (!target_macro.empty() && !target_found && initial.begin()->get_value() != target_macro) {
-                return;
-            }
-            if (!target_macro.empty() && !target_found && initial.begin()->get_value() == target_macro) {
-                target_found = true;
+            if (!target_macro.empty() && !target_found) {
+                if (initial.begin()->get_value() == target_macro) {
+                    target_found = true;
+                } else {
+                    return;
+                }
             }
 
             // Fallback for when preserved versions aren't available
