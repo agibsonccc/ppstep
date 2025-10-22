@@ -260,11 +260,34 @@ namespace ppstep {
                 return false;
             }
 
-            std::string error_file;
+            // Extract error information for recording and logging
+            std::string error_msg = "<unknown>";
+            std::string error_file = "<unknown>";
+            int error_line = 0;
+
+            try {
+                error_msg = e.description();
+            } catch (...) {
+                try {
+                    error_msg = e.what();
+                } catch (...) {}
+            }
+
             try {
                 error_file = e.file_name();
             } catch (...) {}
 
+            try {
+                error_line = e.line_no();
+            } catch (...) {}
+
+            // Always record the error in the trace (if recording is active)
+            // This captures errors from all files, not just the main input file
+            if (!debug && sink) {
+                sink->on_error(error_msg, error_file, error_line);
+            }
+
+            // Only create separate error log files for main input file errors
             if (main_input_file.empty() || error_file != main_input_file) {
                 return false;
             }
