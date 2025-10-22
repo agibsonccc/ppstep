@@ -107,11 +107,21 @@ namespace ppstep {
 
             auto const& initial = *(state->expanding.rbegin());
 
+            // Get the macro name being expanded (first token in initial)
+            std::string expanding_macro_name;
+            if (!initial.empty()) {
+                expanding_macro_name = initial.front().get_value().c_str();
+            }
+
             // Check for unexpanded macros in the result
             std::vector<std::string> unexpanded;
             for (auto const& tok : result) {
                 if (is_unexpanded_macro(tok)) {
                     std::string name = tok.get_value().c_str();
+                    // Skip the macro being expanded itself (it's expected to be consumed)
+                    if (name == expanding_macro_name) {
+                        continue;
+                    }
                     // Avoid duplicates in the same expansion
                     if (std::find(unexpanded.begin(), unexpanded.end(), name) == unexpanded.end()) {
                         unexpanded.push_back(name);
@@ -138,7 +148,8 @@ namespace ppstep {
                         }
                     }
 
-                    std::string error_msg = "Unexpanded macro '" + name + "' found in expansion result (likely undefined)";
+                    std::string error_msg = "Undefined sub-macro '" + name + "' found in expansion of '" +
+                                          expanding_macro_name + "' (macro not defined or misspelled)";
                     sink->on_error(error_msg, file, line);
                 }
             }
