@@ -127,7 +127,8 @@ namespace ppstep {
                     int line = 0;
 
                     for (auto const& tok : result) {
-                        if (tok.get_value() == name) {
+                        std::string tok_value = tok.get_value().c_str();
+                        if (tok_value == name) {
                             try {
                                 auto pos = tok.get_position();
                                 file = pos.get_file().c_str();
